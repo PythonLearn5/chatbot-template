@@ -20,14 +20,13 @@ export function SetupNotice({ isAuthError }: { isAuthError: boolean }) {
             </EmptyMedia>
             <EmptyTitle>Connect the AI Gateway</EmptyTitle>
             <EmptyDescription>
-              This template needs an AI Gateway credential. On Vercel
-              deployments this works automatically — enable the AI Gateway for
-              your project. For local development, either run{" "}
-              <code>vercel env pull</code> after linking your project, or
-              create an{" "}
+              This template needs an AI Gateway credential. Vercel deployments
+              authenticate automatically via OIDC. For local development,
+              either run <code>vercel env pull</code> after linking your
+              project, or create an{" "}
               <a
                 className="underline underline-offset-4"
-                href="https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%2Fapi-keys"
+                href="https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys"
                 target="_blank"
                 rel="noreferrer"
               >

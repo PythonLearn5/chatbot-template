@@ -13,7 +13,7 @@ A minimal chatbot template built with Next.js, the [AI SDK](https://ai-sdk.dev),
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fshadcn-ui%2Fchatbot-template&project-name=chatbot-template&repository-name=chatbot-template)
 
-Deploy the template to Vercel, then enable the **AI Gateway** for the project in your dashboard. Deployments authenticate to the gateway automatically via OIDC.
+That's it — no configuration needed. Vercel deployments authenticate to the AI Gateway automatically via OIDC, and usage runs on your team's [AI Gateway credits](https://vercel.com/docs/ai-gateway/pricing).
 
 ## Local development
 
