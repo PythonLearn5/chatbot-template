@@ -1,13 +1,13 @@
 # Chatbot Template
 
-A minimal chatbot template built with Next.js, the [AI SDK](https://ai-sdk.dev), [shadcn/ui](https://ui.shadcn.com), and the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
+A minimal chatbot template built with Next.js, the [AI SDK](https://ai-sdk.dev), [shadcn/ui](https://ui.shadcn.com), [shadcn/react]([https://ui.shadcn.com](https://ui.shadcn.com/docs/react/message-scroller)), [shadcn/typeset]([https://ui.shadcn.com](https://ui.shadcn.com/typeset))and the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
 
 ## Features
 
 - Streaming chat with markdown rendering and shadcn/typeset
 - Tool calling example
 - Web search via each provider's built-in search tool
-- Human-in-the-loop questionnaire — the model can ask clarifying questions, answered with the shadcn questionnaire component
+- Human-in-the-loop questionnaire. The model can ask clarifying questions, answered with the shadcn questionnaire component
 
 ## Deploy
 
