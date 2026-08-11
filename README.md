@@ -1,6 +1,6 @@
 # Chatbot Template
 
-A minimal chatbot template built with Next.js, the [AI SDK](https://ai-sdk.dev), [shadcn/ui](https://ui.shadcn.com), [shadcn/react]([https://ui.shadcn.com](https://ui.shadcn.com/docs/react/message-scroller)), [shadcn/typeset]([https://ui.shadcn.com](https://ui.shadcn.com/typeset))and the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
+A minimal chatbot template built with Next.js, the [AI SDK](https://ai-sdk.dev), [shadcn/ui](https://ui.shadcn.com), [shadcn/react](https://ui.shadcn.com/docs/react/message-scroller), [shadcn/typeset](https://ui.shadcn.com/docs/typeset) and the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
 
 ## Features
 
