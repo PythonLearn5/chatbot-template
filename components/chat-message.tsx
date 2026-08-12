@@ -6,6 +6,7 @@ import { GithubRepoPart } from "@/components/parts/github-repo-part"
 import { SourcesPart } from "@/components/parts/sources-part"
 import { TextPart } from "@/components/parts/text-part"
 import { WebSearchPart } from "@/components/parts/web-search-part"
+import { WeatherPart } from "@/components/parts/weather-part"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageContent } from "@/components/ui/message"
 
@@ -46,6 +47,8 @@ export function ChatMessage({
               return <AskUserPart key={part.toolCallId} part={part} />
             case "tool-web_search":
               return <WebSearchPart key={part.toolCallId} part={part} />
+            case "tool-weather":
+              return <WeatherPart key={part.toolCallId} part={part} />
             default:
               return null
           }

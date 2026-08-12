@@ -3,10 +3,12 @@ import { type InferUITools, type UIDataTypes, type UIMessage } from "ai"
 import { askUser } from "./ask_user"
 import { githubRepo } from "./github_repo"
 import { getWebSearch } from "./web_search"
+import { weather } from "./weather"
 
 const baseTools = {
   github_repo: githubRepo,
   ask_user: askUser,
+  weather: weather,
 }
 
 export function getTools(modelId: string) {
@@ -44,4 +46,9 @@ export type AskUserToolPart = Extract<
 export type WebSearchToolPart = Extract<
   ChatMessagePart,
   { type: "tool-web_search" }
+>
+
+export type WeatherToolPart = Extract<
+  ChatMessagePart,
+  { type: "tool-weather" }
 >
