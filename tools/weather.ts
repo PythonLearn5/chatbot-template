@@ -3,22 +3,37 @@ import { z } from "zod"
 
 export const weather = tool({
   description:
-    "Get current weather and travel advice for a city. Use this when the user asks about weather, travel conditions, or packing suggestions for a trip.",
+    "Get weather forecast and travel advice for a city. Supports today, tomorrow, and multi-day forecasts. Use this when the user asks about weather, travel conditions, or packing suggestions for a trip.",
   inputSchema: z.object({
     city: z.string().describe("The city name, e.g. \"Beijing\", \"Shanghai\", \"New York\""),
+    days: z
+      .number()
+      .int()
+      .min(1)
+      .max(7)
+      .optional()
+      .describe("Number of forecast days (1=today, 2=today+tomorrow, up to 7). Defaults to 1 (today only)."),
   }),
   outputSchema: z.union([
     z.object({ error: z.string() }),
     z.object({
       city: z.string(),
-      temperature: z.number(),
-      windSpeed: z.number(),
-      weatherCode: z.number(),
-      weatherDescription: z.string(),
-      travelAdvice: z.string(),
+      forecasts: z.array(
+        z.object({
+          date: z.string(),
+          dayLabel: z.string(),
+          tempMax: z.number(),
+          tempMin: z.number(),
+          windSpeedMax: z.number(),
+          weatherCode: z.number(),
+          weatherDescription: z.string(),
+          travelAdvice: z.string(),
+        })
+      ),
     }),
   ]),
-  execute: async ({ city }, { abortSignal }) => {
+  execute: async ({ city, days }, { abortSignal }) => {
+    const forecastDays = Math.min(Math.max(days ?? 1, 1), 7)
     const timeout = AbortSignal.timeout(8000)
     const signal = abortSignal
       ? AbortSignal.any([abortSignal, timeout])
@@ -31,41 +46,60 @@ export const weather = tool({
         { signal }
       )
       if (!geoRes.ok) {
-        return { error: `Could not geocode city "${city}".` }
+        return { error: `无法定位城市"${city}"。` }
       }
       const geoData = await geoRes.json()
       if (!geoData.results || geoData.results.length === 0) {
-        return { error: `City "${city}" not found.` }
+        return { error: `未找到城市"${city}"。` }
       }
 
       const { latitude, longitude, name } = geoData.results[0]
 
-      // Step 2: Fetch current weather
+      // Step 2: Fetch daily forecast
       const weatherRes = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,wind_speed_10m,weather_code`,
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
+          `&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max` +
+          `&forecast_days=${forecastDays}&timezone=auto`,
         { signal }
       )
       if (!weatherRes.ok) {
-        return { error: `Could not fetch weather for "${city}".` }
+        return { error: `无法获取"${city}"的天气数据。` }
       }
       const weatherData = await weatherRes.json()
-      const current = weatherData.current
+      const daily = weatherData.daily
 
-      const weatherCode = Number(current.weather_code ?? 0)
-      const temperature = Number(current.temperature_2m ?? 0)
-      const windSpeed = Number(current.wind_speed_10m ?? 0)
-      const weatherDescription = describeWeatherCode(weatherCode)
+      const dates: string[] = daily.time ?? []
+      const tempMaxArr: number[] = daily.temperature_2m_max ?? []
+      const tempMinArr: number[] = daily.temperature_2m_min ?? []
+      const windMaxArr: number[] = daily.wind_speed_10m_max ?? []
+      const codeArr: number[] = daily.weather_code ?? []
+
+      const forecasts = dates.map((date, i) => {
+        const tempMax = Number(tempMaxArr[i] ?? 0)
+        const tempMin = Number(tempMinArr[i] ?? 0)
+        const windSpeedMax = Number(windMaxArr[i] ?? 0)
+        const weatherCode = Number(codeArr[i] ?? 0)
+        const weatherDescription = describeWeatherCode(weatherCode)
+        const dayLabel = i === 0 ? "今天" : i === 1 ? "明天" : i === 2 ? "后天" : `第${i + 1}天`
+
+        return {
+          date: String(date),
+          dayLabel,
+          tempMax,
+          tempMin,
+          windSpeedMax,
+          weatherCode,
+          weatherDescription,
+          travelAdvice: generateTravelAdvice(tempMax, tempMin, weatherCode, windSpeedMax),
+        }
+      })
 
       return {
         city: String(name),
-        temperature,
-        windSpeed,
-        weatherCode,
-        weatherDescription,
-        travelAdvice: generateTravelAdvice(temperature, weatherCode, windSpeed),
+        forecasts,
       }
     } catch {
-      return { error: `Could not reach weather service for "${city}".` }
+      return { error: `无法连接天气服务查询"${city}"。` }
     }
   },
 })
@@ -106,20 +140,22 @@ function describeWeatherCode(code: number): string {
 }
 
 function generateTravelAdvice(
-  temp: number,
+  tempMax: number,
+  tempMin: number,
   weatherCode: number,
   windSpeed: number
 ): string {
   const tips: string[] = []
+  const avgTemp = (tempMax + tempMin) / 2
 
-  // Temperature advice
-  if (temp < 0) {
+  // Temperature advice (based on average of max/min)
+  if (avgTemp < 0) {
     tips.push("气温低于0°C，建议穿厚羽绒服、戴帽子和手套，注意防寒保暖")
-  } else if (temp < 10) {
+  } else if (avgTemp < 10) {
     tips.push("气温较低，建议穿厚外套或大衣")
-  } else if (temp < 20) {
+  } else if (avgTemp < 20) {
     tips.push("气温凉爽，建议穿薄外套或长袖")
-  } else if (temp < 30) {
+  } else if (avgTemp < 30) {
     tips.push("气温舒适，适合出行")
   } else {
     tips.push("气温较高，注意防晒补水，穿轻薄透气衣物")
@@ -139,6 +175,12 @@ function generateTravelAdvice(
   // Wind advice
   if (windSpeed > 30) {
     tips.push("风力较大，户外活动请注意安全")
+  }
+
+  // Day/night温差
+  const diff = tempMax - tempMin
+  if (diff >= 10) {
+    tips.push(`昼夜温差大（${diff.toFixed(0)}°C），建议携带外套备用`)
   }
 
   return tips.join("；")
