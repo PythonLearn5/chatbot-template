@@ -2,6 +2,7 @@
 export const MODELS = [
   { id: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5" },
   { id: "openai/gpt-5.6-terra", name: "GPT 5.6 Terra" },
+  { id: "inclusionai/ling-3.0-tiny-free", name: "Ling 3.0 Tiny (Free)" },
 ]
 
 export const DEFAULT_MODEL = MODELS[0].id
