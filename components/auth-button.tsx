@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { UserIcon, LogOutIcon } from "lucide-react"
+import Link from "next/link"
+import { UserIcon, LogOutIcon, ArrowRightIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,26 +14,13 @@ import {
   DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog"
-
-interface AuthUser {
-  token: string
-  userId: string
-  name: string
-}
+import { useAuth } from "@/hooks/use-auth"
 
 export function AuthButton() {
-  const [user, setUser] = React.useState<AuthUser | null>(null)
+  const { user, setAuth } = useAuth()
   const [name, setName] = React.useState("")
   const [loading, setLoading] = React.useState(false)
   const [open, setOpen] = React.useState(false)
-
-  React.useEffect(() => {
-    // 从 cookie 检查是否已登录
-    fetch("/api/auth", { credentials: "include" })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => data && setUser(data))
-      .catch(() => {})
-  }, [])
 
   async function handleLogin() {
     if (!name.trim()) return
@@ -46,7 +34,7 @@ export function AuthButton() {
       })
       if (res.ok) {
         const data = await res.json()
-        setUser(data)
+        setAuth(data)
         setOpen(false)
         setName("")
       }
@@ -57,7 +45,7 @@ export function AuthButton() {
 
   async function handleLogout() {
     await fetch("/api/auth", { method: "DELETE", credentials: "include" })
-    setUser(null)
+    setAuth(null)
   }
 
   if (user) {
@@ -103,6 +91,27 @@ export function AuthButton() {
               {loading ? "登录中…" : "登录"}
             </Button>
           </DialogClose>
+        </div>
+        <div className="mt-3 flex flex-col gap-1 border-t border-border pt-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            没有账号？
+            <Link
+              href="/register"
+              className="ml-1 font-medium text-primary hover:underline"
+              onClick={() => setOpen(false)}
+            >
+              去注册 <ArrowRightIcon className="inline size-3.5 align-middle" />
+            </Link>
+          </span>
+          <span>
+            <Link
+              href="/login"
+              className="font-medium text-primary hover:underline"
+              onClick={() => setOpen(false)}
+            >
+              独立登录页 <ArrowRightIcon className="inline size-3.5 align-middle" />
+            </Link>
+          </span>
         </div>
       </DialogContent>
     </Dialog>

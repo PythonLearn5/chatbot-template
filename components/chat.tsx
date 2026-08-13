@@ -3,6 +3,9 @@
 import * as React from "react"
 import { useChat } from "@ai-sdk/react"
 import { lastAssistantMessageIsCompleteWithToolCalls } from "ai"
+import Link from "next/link"
+import { LogInIcon, UserPlusIcon } from "lucide-react"
+
 import { type GatewayModel } from "@/lib/models"
 import { type ChatUIMessage } from "@/tools"
 import { ChatMessage } from "@/components/chat-message"
@@ -11,6 +14,7 @@ import { QuestionCard } from "@/components/question-card"
 import { Suggestions } from "@/components/suggestions"
 import { SystemPromptDialog } from "@/components/system-prompt-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useAuth } from "@/hooks/use-auth"
 import {
   Empty,
   EmptyContent,
@@ -50,6 +54,8 @@ export function Chat({
   const resolvedModel = models.some((m) => m.id === model)
     ? model
     : (models[0]?.id ?? "")
+
+  const { user } = useAuth()
 
   const isBusy = status === "submitted" || status === "streaming"
 
@@ -95,6 +101,32 @@ export function Chat({
                 Pick a model and start chatting. Responses stream through the
                 Vercel AI Gateway.
               </EmptyDescription>
+              {!user && (
+                <div className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <Link
+                    href="/login"
+                    className={
+                      "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-2xl border border-border bg-background px-3 text-sm font-medium transition-all hover:bg-muted hover:text-foreground " +
+                      "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 " +
+                      "has-data-[icon=inline-start]:pl-2"
+                    }
+                  >
+                    <LogInIcon className="size-4" data-icon="inline-start" />
+                    登录
+                  </Link>
+                  <Link
+                    href="/register"
+                    className={
+                      "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-2xl border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/80 " +
+                      "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 " +
+                      "has-data-[icon=inline-start]:pl-2"
+                    }
+                  >
+                    <UserPlusIcon className="size-4" data-icon="inline-start" />
+                    注册新账号
+                  </Link>
+                </div>
+              )}
             </EmptyHeader>
             <EmptyContent>
               <Suggestions
