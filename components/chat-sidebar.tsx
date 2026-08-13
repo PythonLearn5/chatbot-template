@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import type { ChatMeta } from "@/lib/storage"
+import { KnowledgeUpload } from "@/components/knowledge-upload"
+import { MCPPanel } from "@/components/mcp-panel"
+import { StatsPanel } from "@/components/stats-panel"
 
 export function ChatSidebar({
   chats,
@@ -28,7 +31,7 @@ export function ChatSidebar({
     e.stopPropagation()
     setDeleting(chatId)
     try {
-      await fetch(`/api/chats/${chatId}`, { method: "DELETE" })
+      await fetch(`/api/chats/${chatId}`, { method: "DELETE", credentials: "include" })
       onRefresh?.()
       if (pathname === `/c/${chatId}`) {
         router.push("/")
@@ -79,6 +82,14 @@ export function ChatSidebar({
             ))}
           </div>
         )}
+      </div>
+      <Separator />
+      <div className="flex flex-col gap-4 p-3 text-xs">
+        <KnowledgeUpload />
+        <Separator />
+        <MCPPanel />
+        <Separator />
+        <StatsPanel />
       </div>
     </aside>
   )

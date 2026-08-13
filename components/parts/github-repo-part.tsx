@@ -19,33 +19,36 @@ export function GithubRepoPart({ part }: { part: GithubRepoToolPart }) {
           Looking up {part.input?.repo ?? "repository"}…
         </div>
       )
-    case "output-available":
+    case "output-available": {
+      if (!part.output) {
+        return null
+      }
       if ("error" in part.output) {
         return (
-          <div className="text-sm text-destructive">{part.output.error}</div>
+          <div className="text-sm text-destructive">{String((part.output as any).error)}</div>
         )
       }
+      const o = part.output as any
       return (
         <a
-          href={safeHttpUrl(part.output.url) ?? "#"}
+          href={safeHttpUrl(o.url) ?? "#"}
           target="_blank"
           rel="noreferrer"
           className="flex w-fit items-center gap-3 px-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          <span className="font-medium text-foreground">
-            {part.output.repo}
-          </span>
+          <span className="font-medium text-foreground">{o.repo}</span>
           <span className="flex items-center gap-1">
             <StarIcon className="size-3.5" />
-            {formatCount(part.output.stars)}
+            {formatCount(o.stars)}
           </span>
           <span className="flex items-center gap-1">
             <GitForkIcon className="size-3.5" />
-            {formatCount(part.output.forks)}
+            {formatCount(o.forks)}
           </span>
-          <span>{part.output.language}</span>
+          <span>{String(o.language ?? "")}</span>
         </a>
       )
+    }
     case "output-error":
       return (
         <div className="text-sm text-destructive">

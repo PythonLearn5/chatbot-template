@@ -1,6 +1,7 @@
 // ============================================================================
 // 存储抽象层 — 使用文件系统 JSON 持久化，本地开发零依赖
 // 生产环境可替换为 Vercel KV / PostgreSQL
+// 按 userId 隔离：文件路径 .data/users/{userId}/...
 // ============================================================================
 
 import "server-only"
@@ -8,13 +9,40 @@ import { promises as fs } from "fs"
 import path from "path"
 import type { UIMessage } from "ai"
 
-// 存储目录：项目根目录下的 .data/chats
 const DATA_DIR = path.join(process.cwd(), ".data")
-const CHATS_DIR = path.join(DATA_DIR, "chats")
-const MEMORY_DIR = path.join(DATA_DIR, "memory")
+
+function userDir(userId: string): string {
+  // 对 userId 做 hash，避免特殊字符
+  const hash = require("crypto")
+    .createHash("sha256")
+    .update(userId)
+    .digest("hex")
+    .slice(0, 12)
+  return path.join(DATA_DIR, "users", hash)
+}
+
+function chatsDir(userId: string): string {
+  return path.join(userDir(userId), "chats")
+}
+
+function memoryDir(userId: string): string {
+  return path.join(userDir(userId), "memory")
+}
 
 async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true })
+}
+
+// 未登录共享目录（向后兼容）
+const ANON_CHATS_DIR = path.join(DATA_DIR, "chats")
+const ANON_MEMORY_DIR = path.join(DATA_DIR, "memory")
+
+function getChatsDir(userId?: string): string {
+  return userId ? chatsDir(userId) : ANON_CHATS_DIR
+}
+
+function getMemoryDir(userId?: string): string {
+  return userId ? memoryDir(userId) : ANON_MEMORY_DIR
 }
 
 // ============================================================================
@@ -26,21 +54,26 @@ export interface ChatMeta {
   createdAt: number
   updatedAt: number
   messageCount: number
+  systemPrompt?: string
+  promptTemplateId?: string
 }
 
 // ============================================================================
-// 会话存储 — 读写聊天记录
+// 会话存储 — 读写聊天记录（按 userId 隔离）
 // ============================================================================
 export async function saveChat(
   chatId: string,
   messages: UIMessage[],
-  title?: string
+  title?: string,
+  systemPrompt?: string,
+  promptTemplateId?: string,
+  userId?: string
 ): Promise<ChatMeta> {
-  await ensureDir(CHATS_DIR)
+  const dir = getChatsDir(userId)
+  await ensureDir(dir)
   const now = Date.now()
 
-  // 读取现有元数据（如果有）
-  const metaPath = path.join(CHATS_DIR, `${chatId}.meta.json`)
+  const metaPath = path.join(dir, `${chatId}.meta.json`)
   let meta: ChatMeta
   try {
     const existing = JSON.parse(await fs.readFile(metaPath, "utf-8"))
@@ -49,6 +82,8 @@ export async function saveChat(
       updatedAt: now,
       messageCount: messages.length,
       title: title ?? existing.title,
+      systemPrompt: systemPrompt ?? existing.systemPrompt,
+      promptTemplateId: promptTemplateId ?? existing.promptTemplateId,
     }
   } catch {
     meta = {
@@ -57,13 +92,14 @@ export async function saveChat(
       createdAt: now,
       updatedAt: now,
       messageCount: messages.length,
+      systemPrompt,
+      promptTemplateId,
     }
   }
 
-  // 并行写入消息和元数据
   await Promise.all([
     fs.writeFile(
-      path.join(CHATS_DIR, `${chatId}.messages.json`),
+      path.join(dir, `${chatId}.messages.json`),
       JSON.stringify(messages)
     ),
     fs.writeFile(metaPath, JSON.stringify(meta)),
@@ -72,10 +108,13 @@ export async function saveChat(
   return meta
 }
 
-export async function loadChat(chatId: string): Promise<UIMessage[]> {
+export async function loadChat(
+  chatId: string,
+  userId?: string
+): Promise<UIMessage[]> {
   try {
     const content = await fs.readFile(
-      path.join(CHATS_DIR, `${chatId}.messages.json`),
+      path.join(getChatsDir(userId), `${chatId}.messages.json`),
       "utf-8"
     )
     return JSON.parse(content) as UIMessage[]
@@ -84,13 +123,14 @@ export async function loadChat(chatId: string): Promise<UIMessage[]> {
   }
 }
 
-export async function listChats(): Promise<ChatMeta[]> {
+export async function listChats(userId?: string): Promise<ChatMeta[]> {
+  const dir = getChatsDir(userId)
   try {
-    const files = await fs.readdir(CHATS_DIR)
+    const files = await fs.readdir(dir)
     const metaFiles = files.filter((f) => f.endsWith(".meta.json"))
     const metas = await Promise.all(
       metaFiles.map(async (f) => {
-        const content = await fs.readFile(path.join(CHATS_DIR, f), "utf-8")
+        const content = await fs.readFile(path.join(dir, f), "utf-8")
         return JSON.parse(content) as ChatMeta
       })
     )
@@ -100,20 +140,27 @@ export async function listChats(): Promise<ChatMeta[]> {
   }
 }
 
-export async function deleteChat(chatId: string): Promise<void> {
-  await ensureDir(CHATS_DIR)
+export async function deleteChat(
+  chatId: string,
+  userId?: string
+): Promise<void> {
+  const dir = getChatsDir(userId)
+  await ensureDir(dir)
   const tasks: Promise<void>[] = [
-    fs.unlink(path.join(CHATS_DIR, `${chatId}.messages.json`)).catch(() => {}),
-    fs.unlink(path.join(CHATS_DIR, `${chatId}.meta.json`)).catch(() => {}),
-    fs.unlink(path.join(CHATS_DIR, `${chatId}.summary.json`)).catch(() => {}),
+    fs.unlink(path.join(dir, `${chatId}.messages.json`)).catch(() => {}),
+    fs.unlink(path.join(dir, `${chatId}.meta.json`)).catch(() => {}),
+    fs.unlink(path.join(dir, `${chatId}.summary.json`)).catch(() => {}),
   ]
   await Promise.all(tasks)
 }
 
-export async function getChatMeta(chatId: string): Promise<ChatMeta | null> {
+export async function getChatMeta(
+  chatId: string,
+  userId?: string
+): Promise<ChatMeta | null> {
   try {
     const content = await fs.readFile(
-      path.join(CHATS_DIR, `${chatId}.meta.json`),
+      path.join(getChatsDir(userId), `${chatId}.meta.json`),
       "utf-8"
     )
     return JSON.parse(content) as ChatMeta
@@ -123,21 +170,23 @@ export async function getChatMeta(chatId: string): Promise<ChatMeta | null> {
 }
 
 // ============================================================================
-// 摘要缓存 — Phase 2 增强部分
-// 当对话超过阈值时，用模型生成旧消息摘要并缓存，避免每次都重新生成
+// 摘要缓存
 // ============================================================================
 export interface SummaryCache {
   chatId: string
-  summary: string          // 摘要文本
-  summarizedCount: number  // 已摘要的消息数量
+  summary: string
+  summarizedCount: number
   createdAt: number
   updatedAt: number
 }
 
-export async function loadSummary(chatId: string): Promise<SummaryCache | null> {
+export async function loadSummary(
+  chatId: string,
+  userId?: string
+): Promise<SummaryCache | null> {
   try {
     const content = await fs.readFile(
-      path.join(CHATS_DIR, `${chatId}.summary.json`),
+      path.join(getChatsDir(userId), `${chatId}.summary.json`),
       "utf-8"
     )
     return JSON.parse(content) as SummaryCache
@@ -149,11 +198,13 @@ export async function loadSummary(chatId: string): Promise<SummaryCache | null> 
 export async function saveSummary(
   chatId: string,
   summary: string,
-  summarizedCount: number
+  summarizedCount: number,
+  userId?: string
 ): Promise<SummaryCache> {
-  await ensureDir(CHATS_DIR)
+  const dir = getChatsDir(userId)
+  await ensureDir(dir)
   const now = Date.now()
-  const existing = await loadSummary(chatId)
+  const existing = await loadSummary(chatId, userId)
   const entry: SummaryCache = {
     chatId,
     summary,
@@ -162,18 +213,23 @@ export async function saveSummary(
     updatedAt: now,
   }
   await fs.writeFile(
-    path.join(CHATS_DIR, `${chatId}.summary.json`),
+    path.join(dir, `${chatId}.summary.json`),
     JSON.stringify(entry)
   )
   return entry
 }
 
-export async function deleteSummary(chatId: string): Promise<void> {
-  await fs.unlink(path.join(CHATS_DIR, `${chatId}.summary.json`)).catch(() => {})
+export async function deleteSummary(
+  chatId: string,
+  userId?: string
+): Promise<void> {
+  await fs
+    .unlink(path.join(getChatsDir(userId), `${chatId}.summary.json`))
+    .catch(() => {})
 }
 
 // ============================================================================
-// 长期记忆存储 — Phase 4 使用
+// 长期记忆存储 — 按 userId 隔离
 // ============================================================================
 export interface MemoryEntry {
   id: string
@@ -184,9 +240,13 @@ export interface MemoryEntry {
   updatedAt: number
 }
 
-export async function saveMemory(entry: Omit<MemoryEntry, "id" | "createdAt" | "updatedAt">): Promise<MemoryEntry> {
-  await ensureDir(MEMORY_DIR)
-  const indexPath = path.join(MEMORY_DIR, "index.json")
+export async function saveMemory(
+  entry: Omit<MemoryEntry, "id" | "createdAt" | "updatedAt">,
+  userId?: string
+): Promise<MemoryEntry> {
+  const dir = getMemoryDir(userId)
+  await ensureDir(dir)
+  const indexPath = path.join(dir, "index.json")
 
   let entries: MemoryEntry[] = []
   try {
@@ -218,10 +278,12 @@ export async function saveMemory(entry: Omit<MemoryEntry, "id" | "createdAt" | "
   return result
 }
 
-export async function loadAllMemories(): Promise<MemoryEntry[]> {
+export async function loadAllMemories(
+  userId?: string
+): Promise<MemoryEntry[]> {
   try {
     const content = await fs.readFile(
-      path.join(MEMORY_DIR, "index.json"),
+      path.join(getMemoryDir(userId), "index.json"),
       "utf-8"
     )
     return JSON.parse(content) as MemoryEntry[]
@@ -230,8 +292,11 @@ export async function loadAllMemories(): Promise<MemoryEntry[]> {
   }
 }
 
-export async function searchMemories(query: string): Promise<MemoryEntry[]> {
-  const all = await loadAllMemories()
+export async function searchMemories(
+  query: string,
+  userId?: string
+): Promise<MemoryEntry[]> {
+  const all = await loadAllMemories(userId)
   const q = query.toLowerCase()
   return all.filter(
     (e) =>

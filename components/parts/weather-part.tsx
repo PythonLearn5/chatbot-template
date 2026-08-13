@@ -13,21 +13,25 @@ export function WeatherPart({ part }: { part: WeatherToolPart }) {
           正在查询{part.input?.city ? ` ${part.input.city} ` : ""}天气…
         </div>
       )
-    case "output-available":
+    case "output-available": {
+      if (!part.output) {
+        return null
+      }
       if ("error" in part.output) {
         return (
-          <div className="text-sm text-destructive">{part.output.error}</div>
+          <div className="text-sm text-destructive">{String((part.output as any).error)}</div>
         )
       }
+      const o = part.output as any
       return (
         <div className="flex w-fit flex-col gap-1.5 px-1.5 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <CloudSunIcon className="size-4" />
             <span className="font-medium text-foreground">
-              {part.output.city}
+              {o.city}
             </span>
           </div>
-          {part.output.forecasts.map((f, i) => (
+          {(o.forecasts ?? []).map((f: any, i: number) => (
             <div key={i} className="flex items-center gap-3 pl-6">
               <span className="w-16 shrink-0 font-medium text-foreground">{f.dayLabel}</span>
               <span className="w-20 shrink-0 text-muted-foreground">{f.date}</span>
@@ -36,8 +40,14 @@ export function WeatherPart({ part }: { part: WeatherToolPart }) {
               <span>最大风速 {f.windSpeedMax} km/h</span>
             </div>
           ))}
+          {o.travelAdvice && (
+            <div className="pl-6 text-xs text-foreground/80 italic">
+              🧳 出行建议：{o.travelAdvice}
+            </div>
+          )}
         </div>
       )
+    }
     case "output-error":
       return (
         <div className="text-sm text-destructive">

@@ -6,9 +6,10 @@ import { lastAssistantMessageIsCompleteWithToolCalls } from "ai"
 import { type GatewayModel } from "@/lib/models"
 import { type ChatUIMessage } from "@/tools"
 import { ChatMessage } from "@/components/chat-message"
-import { PromptForm } from "@/components/prompt-form"
+import { PromptForm, type ImageAttachment } from "@/components/prompt-form"
 import { QuestionCard } from "@/components/question-card"
 import { Suggestions } from "@/components/suggestions"
+import { SystemPromptDialog } from "@/components/system-prompt-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Empty,
@@ -52,11 +53,16 @@ export function Chat({
 
   const isBusy = status === "submitted" || status === "streaming"
 
+  const errorMsg = error?.message ?? ""
+  const errorIs429 =
+    /429|过于频繁|次数已达上限|请稍后再试|请明天再试/i.test(errorMsg)
+  const errorIs401 = /未登录|Unauthorized|请先.*登录|请点击.*登录/i.test(errorMsg)
+
   const lastMessage = messages.at(-1)
   const pendingQuestion =
     lastMessage?.role === "assistant"
       ? lastMessage.parts.find(
-          (part): part is Extract<typeof part, { type: "tool-ask_user" }> =>
+          (part: any) =>
             part.type === "tool-ask_user" &&
             (part.state === "input-streaming" ||
               part.state === "input-available")
@@ -69,7 +75,17 @@ export function Chat({
   }
 
   return (
-    <div className="mx-auto flex min-h-0 w-full flex-1 flex-col">
+    <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col">
+      {errorIs429 && (
+        <div className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 rounded-xl border border-destructive/60 bg-destructive/10 px-4 py-2 text-sm text-destructive shadow-lg animate-in fade-in slide-in-from-top-2">
+          ⛔ 请求过于频繁：当前窗口对话次数已达上限，请稍后再试。
+        </div>
+      )}
+      {errorIs401 && (
+        <div className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 rounded-xl border border-amber-500/60 bg-amber-500/10 px-4 py-2 text-sm text-amber-700 shadow-lg animate-in fade-in slide-in-from-top-2">
+          🔒 未登录：请点击右上角「登录」，然后再管理会话/上传知识库等操作。
+        </div>
+      )}
       {messages.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6">
           <Empty>
@@ -134,20 +150,46 @@ export function Chat({
       )}
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-6 pb-6">
-        {error && (
+        {error && !errorIs401 && !errorIs429 && (
           <Alert variant="destructive">
             <AlertTitle>Request failed</AlertTitle>
             <AlertDescription>{error.message}</AlertDescription>
           </Alert>
         )}
+        <div className="flex items-center justify-between">
+          <div />
+          <SystemPromptDialog chatId={chatId} />
+        </div>
         <PromptForm
           models={models}
           model={resolvedModel}
           onModelChange={setModel}
           isBusy={isBusy}
-          onSubmit={(text) =>
-            sendMessage({ text }, sendOptions)
-          }
+          onSubmit={(text, images) => {
+            if (images && images.length > 0) {
+              Promise.all(
+                images.map(async (img) => {
+                  const buffer = await img.file.arrayBuffer()
+                  const bytes = new Uint8Array(buffer)
+                  let binary = ""
+                  for (let i = 0; i < bytes.length; i++) {
+                    binary += String.fromCharCode(bytes[i])
+                  }
+                  const base64 = btoa(binary)
+                  return {
+                    type: "file" as const,
+                    mediaType: img.file.type,
+                    filename: img.file.name,
+                    url: `data:${img.file.type};base64,${base64}`,
+                  }
+                })
+              ).then((files) => {
+                sendMessage({ text, files }, sendOptions)
+              })
+            } else {
+              sendMessage({ text }, sendOptions)
+            }
+          }}
           onStop={() => stop()}
         />
       </div>

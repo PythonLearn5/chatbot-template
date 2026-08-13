@@ -21,7 +21,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // 加载会话列表
   const refreshChats = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/chats")
+      const res = await fetch("/api/chats", { credentials: "include" })
       const data = await res.json()
       setChats(data.chats ?? [])
     } catch {
@@ -33,7 +33,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     refreshChats()
-  }, [refreshChats, chatId])
+  }, [refreshChats])
 
   return (
     <div className="flex h-full flex-1 overflow-hidden">

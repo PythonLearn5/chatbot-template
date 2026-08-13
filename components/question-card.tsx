@@ -26,7 +26,9 @@ export function QuestionCard({
     answers: { question: string; answer: string }[]
   ) => void
 }) {
-  const questions = part.state === "input-available" ? part.input.questions : []
+  const questions = part.state === "input-available" && part.input
+    ? (part.input as any).questions ?? []
+    : []
 
   return (
     <div className="sticky bottom-2 isolate z-50 mx-auto w-full max-w-2xl px-6 pt-2">
@@ -39,8 +41,8 @@ export function QuestionCard({
           <Questionnaire
             key={part.toolCallId}
             defaultItem="q0"
-            items={questions.map((question, index) => ({
-              choices: question.choices.map((choice) => ({ value: choice })),
+            items={(questions as any[]).map((question: any, index: number) => ({
+              choices: (question.choices ?? []).map((choice: any) => ({ value: choice })),
               name: `q${index}`,
               required: true,
             }))}
@@ -49,7 +51,7 @@ export function QuestionCard({
               const formData = new FormData(event.currentTarget)
               onAnswer(
                 part.toolCallId,
-                questions.map((question, index) => ({
+                (questions as any[]).map((question: any, index: number) => ({
                   question: question.question,
                   answer: String(formData.get(`q${index}`) ?? ""),
                 }))
@@ -59,11 +61,11 @@ export function QuestionCard({
             {questions.length > 1 && (
               <QuestionnaireProgress className="-mb-4" />
             )}
-            {questions.map((question, index) => (
+            {(questions as any[]).map((question: any, index: number) => (
               <QuestionnaireItem key={index} name={`q${index}`} required>
                 <QuestionnaireTitle>{question.question}</QuestionnaireTitle>
                 <QuestionnaireChoices>
-                  {question.choices.map((choice) => (
+                  {(question.choices ?? []).map((choice: any) => (
                     <QuestionnaireChoice key={choice} value={choice}>
                       {choice}
                     </QuestionnaireChoice>
