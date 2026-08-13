@@ -135,10 +135,10 @@ POST /api/chat
 
 | 工具 | 文件 | 类型 | 说明 |
 |------|------|------|------|
-| `github_repo` | [tools/github_repo.ts](tools/github_repo.ts) | 服务端执行 | 查询 GitHub 仓库 stars/forks/language |
-| `ask_user` | [tools/ask_user.ts](tools/ask_user.ts) | 人机交互 | 模型向用户提问，前端渲染问卷 |
-| `web_search` | [tools/web_search.ts](tools/web_search.ts) | 厂商原生 | 按模型前缀选择 OpenAI/Anthropic 搜索 |
-| `weather` | [tools/weather.ts](tools/weather.ts) | 服务端执行 | 查询城市多日天气预报和出行建议 |
+| `github_repo` | [tools/github_repo.ts](../tools/github_repo.ts) | 服务端执行 | 查询 GitHub 仓库 stars/forks/language |
+| `ask_user` | [tools/ask_user.ts](../tools/ask_user.ts) | 人机交互 | 模型向用户提问，前端渲染问卷 |
+| `web_search` | [tools/web_search.ts](../tools/web_search.ts) | 厂商原生 | 按模型前缀选择 OpenAI/Anthropic 搜索 |
+| `weather` | [tools/weather.ts](../tools/weather.ts) | 服务端执行 | 查询城市多日天气预报和出行建议 |
 
 **工具分发逻辑：**
 

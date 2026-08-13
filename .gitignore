@@ -40,3 +40,5 @@ pnpm-debug.log*
 next-env.d.ts
 /.idea/
 /package-lock.json
+/.data/chats/DqDQ7oQyKot0H4OO.messages.json
+/.data/chats/DqDQ7oQyKot0H4OO.meta.json

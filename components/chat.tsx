@@ -26,13 +26,23 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 
-export function Chat({ models }: { models: GatewayModel[] }) {
+export function Chat({
+  models,
+  chatId,
+  initialMessages,
+}: {
+  models: GatewayModel[]
+  chatId?: string
+  initialMessages?: ChatUIMessage[]
+}) {
   const [model, setModel] = React.useState(models[0]?.id ?? "")
 
+  // Phase 1: 传入 chatId 和 initialMessages 实现持久化
+  // chatId 变化时 useChat 会重新创建实例，加载新的历史消息
   const { messages, sendMessage, status, stop, error, addToolOutput } =
     useChat<ChatUIMessage>({
-      // Resume the conversation automatically once the user has answered the
-      // ask_user questionnaire.
+      id: chatId,
+      messages: initialMessages,
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     })
 
@@ -53,6 +63,11 @@ export function Chat({ models }: { models: GatewayModel[] }) {
         )
       : undefined
 
+  // 每次发送消息时附带 chatId，后端用于持久化
+  const sendOptions = {
+    body: { model: resolvedModel, id: chatId },
+  }
+
   return (
     <div className="mx-auto flex min-h-0 w-full flex-1 flex-col">
       {messages.length === 0 ? (
@@ -68,10 +83,7 @@ export function Chat({ models }: { models: GatewayModel[] }) {
             <EmptyContent>
               <Suggestions
                 onSelect={(prompt) =>
-                  sendMessage(
-                    { text: prompt },
-                    { body: { model: resolvedModel } }
-                  )
+                  sendMessage({ text: prompt }, sendOptions)
                 }
               />
             </EmptyContent>
@@ -110,7 +122,7 @@ export function Chat({ models }: { models: GatewayModel[] }) {
                       tool: "ask_user",
                       toolCallId,
                       output: answer,
-                      options: { body: { model: resolvedModel } },
+                      options: sendOptions,
                     })
                   }
                 />
@@ -134,7 +146,7 @@ export function Chat({ models }: { models: GatewayModel[] }) {
           onModelChange={setModel}
           isBusy={isBusy}
           onSubmit={(text) =>
-            sendMessage({ text }, { body: { model: resolvedModel } })
+            sendMessage({ text }, sendOptions)
           }
           onStop={() => stop()}
         />

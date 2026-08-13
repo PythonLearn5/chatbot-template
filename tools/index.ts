@@ -4,11 +4,14 @@ import { askUser } from "./ask_user"
 import { githubRepo } from "./github_repo"
 import { getWebSearch } from "./web_search"
 import { weather } from "./weather"
+import { saveMemoryTool, recallMemoryTool } from "./memory"
 
 const baseTools = {
   github_repo: githubRepo,
   ask_user: askUser,
   weather: weather,
+  save_memory: saveMemoryTool,
+  recall_memory: recallMemoryTool,
 }
 
 export function getTools(modelId: string) {
@@ -51,4 +54,14 @@ export type WebSearchToolPart = Extract<
 export type WeatherToolPart = Extract<
   ChatMessagePart,
   { type: "tool-weather" }
+>
+
+export type SaveMemoryToolPart = Extract<
+  ChatMessagePart,
+  { type: "tool-save_memory" }
+>
+
+export type RecallMemoryToolPart = Extract<
+  ChatMessagePart,
+  { type: "tool-recall_memory" }
 >

@@ -3,6 +3,8 @@
 import { type ChatUIMessage } from "@/tools"
 import { AskUserPart } from "@/components/parts/ask-user-part"
 import { GithubRepoPart } from "@/components/parts/github-repo-part"
+import { RecallMemoryPart } from "@/components/parts/recall-memory-part"
+import { SaveMemoryPart } from "@/components/parts/save-memory-part"
 import { SourcesPart } from "@/components/parts/sources-part"
 import { TextPart } from "@/components/parts/text-part"
 import { WebSearchPart } from "@/components/parts/web-search-part"
@@ -49,6 +51,10 @@ export function ChatMessage({
               return <WebSearchPart key={part.toolCallId} part={part} />
             case "tool-weather":
               return <WeatherPart key={part.toolCallId} part={part} />
+            case "tool-save_memory":
+              return <SaveMemoryPart key={part.toolCallId} part={part} />
+            case "tool-recall_memory":
+              return <RecallMemoryPart key={part.toolCallId} part={part} />
             default:
               return null
           }
