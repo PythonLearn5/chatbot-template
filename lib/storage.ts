@@ -105,6 +105,7 @@ export async function deleteChat(chatId: string): Promise<void> {
   const tasks: Promise<void>[] = [
     fs.unlink(path.join(CHATS_DIR, `${chatId}.messages.json`)).catch(() => {}),
     fs.unlink(path.join(CHATS_DIR, `${chatId}.meta.json`)).catch(() => {}),
+    fs.unlink(path.join(CHATS_DIR, `${chatId}.summary.json`)).catch(() => {}),
   ]
   await Promise.all(tasks)
 }
@@ -119,6 +120,56 @@ export async function getChatMeta(chatId: string): Promise<ChatMeta | null> {
   } catch {
     return null
   }
+}
+
+// ============================================================================
+// 摘要缓存 — Phase 2 增强部分
+// 当对话超过阈值时，用模型生成旧消息摘要并缓存，避免每次都重新生成
+// ============================================================================
+export interface SummaryCache {
+  chatId: string
+  summary: string          // 摘要文本
+  summarizedCount: number  // 已摘要的消息数量
+  createdAt: number
+  updatedAt: number
+}
+
+export async function loadSummary(chatId: string): Promise<SummaryCache | null> {
+  try {
+    const content = await fs.readFile(
+      path.join(CHATS_DIR, `${chatId}.summary.json`),
+      "utf-8"
+    )
+    return JSON.parse(content) as SummaryCache
+  } catch {
+    return null
+  }
+}
+
+export async function saveSummary(
+  chatId: string,
+  summary: string,
+  summarizedCount: number
+): Promise<SummaryCache> {
+  await ensureDir(CHATS_DIR)
+  const now = Date.now()
+  const existing = await loadSummary(chatId)
+  const entry: SummaryCache = {
+    chatId,
+    summary,
+    summarizedCount,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  await fs.writeFile(
+    path.join(CHATS_DIR, `${chatId}.summary.json`),
+    JSON.stringify(entry)
+  )
+  return entry
+}
+
+export async function deleteSummary(chatId: string): Promise<void> {
+  await fs.unlink(path.join(CHATS_DIR, `${chatId}.summary.json`)).catch(() => {})
 }
 
 // ============================================================================
