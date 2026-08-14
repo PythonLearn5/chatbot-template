@@ -4,6 +4,7 @@ import * as React from "react"
 
 export interface AuthUser {
   userId: string
+  email: string
   name: string
   token?: string
 }

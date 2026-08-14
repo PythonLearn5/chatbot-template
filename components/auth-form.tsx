@@ -19,12 +19,12 @@ interface Props {
 const TITLES: Record<AuthMode, { title: string; desc: string; cta: string }> = {
   login: {
     title: "欢迎回来",
-    desc: "输入用户名即可登录，继续你的对话、记忆与知识库。",
+    desc: "输入邮箱和密码登录，继续你的对话、记忆与知识库。",
     cta: "登录",
   },
   register: {
     title: "创建账号",
-    desc: "输入一个用户名，一键注册本地账号；无密码、无邮箱。",
+    desc: "使用邮箱注册账号，密码至少 6 位。",
     cta: "注册并登录",
   },
 }
@@ -35,6 +35,8 @@ export function AuthForm({ mode }: Props) {
   const redirect = searchParams?.get("redirect") ?? "/"
   const { setAuth } = useAuth()
 
+  const [email, setEmail] = React.useState("")
+  const [password, setPassword] = React.useState("")
   const [name, setName] = React.useState("")
   const [loading, setLoading] = React.useState(false)
   const [err, setErr] = React.useState<string | null>(null)
@@ -43,8 +45,13 @@ export function AuthForm({ mode }: Props) {
 
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed) return
+    const emailVal = email.trim()
+    const pwdVal = password
+    if (!emailVal || !pwdVal) return
+    if (mode === "register" && pwdVal.length < 6) {
+      setErr("密码至少 6 位")
+      return
+    }
     setErr(null)
     setLoading(true)
     try {
@@ -52,7 +59,12 @@ export function AuthForm({ mode }: Props) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({
+          action: mode === "login" ? "login" : "register",
+          email: emailVal,
+          password: pwdVal,
+          name: name.trim() || undefined,
+        }),
       })
       if (!res.ok) {
         const txt = await res.text().catch(() => "")
@@ -95,23 +107,56 @@ export function AuthForm({ mode }: Props) {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <label
-              htmlFor="name"
+              htmlFor="email"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              用户名
+              邮箱
             </label>
             <Input
-              id="name"
+              id="email"
+              type="email"
               autoFocus
-              autoComplete="username"
-              placeholder={
-                mode === "login"
-                  ? "请输入已有用户名"
-                  : "给自己起个名字，例如 小明"
-              }
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          {mode === "register" && (
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="name"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              >
+                昵称（可选）
+              </label>
+              <Input
+                id="name"
+                autoComplete="name"
+                placeholder="留空则使用邮箱前缀"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <label
+              htmlFor="password"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              密码
+            </label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              placeholder="至少 6 位"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
             />
           </div>
@@ -124,7 +169,7 @@ export function AuthForm({ mode }: Props) {
 
           <Button
             type="submit"
-            disabled={!name.trim() || loading}
+            disabled={!email.trim() || !password || loading}
             className="w-full"
           >
             {loading ? (
