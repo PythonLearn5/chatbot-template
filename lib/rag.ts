@@ -1,57 +1,11 @@
 // ============================================================================
 // 私有知识库 (RAG) — 文档向量化 + 语义检索
-// 使用 AI SDK embed() 通过 AI Gateway 生成向量
-// 向量存储在文件系统（本地开发），生产可替换为 pgvector
-//
-// 新增：按 userId 隔离
-//   已登录 → .data/users/{sha256(userId)[:12]}/knowledge/...
-//   匿名   → .data/knowledge/...
+// 向量存储在 Supabase pgvector，检索使用 HNSW 索引
 // ============================================================================
 
 import "server-only"
-import { promises as fs } from "fs"
-import path from "path"
-import { createHash } from "crypto"
 import { embed } from "ai"
-
-const DATA_DIR = path.join(process.cwd(), ".data")
-const ANON_KNOWLEDGE_DIR = path.join(DATA_DIR, "knowledge")
-
-function userIdHash(userId: string): string {
-  return createHash("sha256").update(userId).digest("hex").slice(0, 12)
-}
-
-function knowledgeDir(userId?: string): string {
-  if (!userId) return ANON_KNOWLEDGE_DIR
-  return path.join(DATA_DIR, "users", userIdHash(userId), "knowledge")
-}
-
-function vectorsDir(userId?: string): string {
-  return path.join(knowledgeDir(userId), "vectors")
-}
-
-function docsDir(userId?: string): string {
-  return path.join(knowledgeDir(userId), "docs")
-}
-
-function listPath(userId?: string): string {
-  return path.join(knowledgeDir(userId), "list.json")
-}
-
-async function ensureDirs(userId?: string) {
-  await Promise.all([
-    fs.mkdir(vectorsDir(userId), { recursive: true }),
-    fs.mkdir(docsDir(userId), { recursive: true }),
-  ])
-}
-
-interface VectorEntry {
-  id: string
-  docId: string
-  chunk: string
-  embedding: number[]
-  createdAt: number
-}
+import { supabase } from "@/lib/db"
 
 export interface KnowledgeDoc {
   id: string
@@ -59,6 +13,25 @@ export interface KnowledgeDoc {
   chunkCount: number
   size: number
   createdAt: number
+}
+
+interface DBKnowledgeDoc {
+  id: string
+  user_id: string | null
+  name: string
+  chunk_count: number
+  size: number
+  created_at: string
+}
+
+function toDoc(row: DBKnowledgeDoc): KnowledgeDoc {
+  return {
+    id: row.id,
+    name: row.name,
+    chunkCount: row.chunk_count,
+    size: row.size,
+    createdAt: new Date(row.created_at).getTime(),
+  }
 }
 
 // 文档分块（固定滑动窗口）
@@ -80,78 +53,6 @@ export function chunkText(
   return chunks.length > 0 ? chunks : [clean]
 }
 
-// 余弦相似度
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0
-  let normA = 0
-  let normB = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB)
-  return denom > 0 ? dot / denom : 0
-}
-
-// ----------------------------------------------------------------------------
-// 持久化辅助
-// ----------------------------------------------------------------------------
-
-async function readList(userId?: string): Promise<KnowledgeDoc[]> {
-  try {
-    const buf = await fs.readFile(listPath(userId), "utf-8")
-    return JSON.parse(buf) as KnowledgeDoc[]
-  } catch {
-    return []
-  }
-}
-
-async function writeList(list: KnowledgeDoc[], userId?: string) {
-  await fs.writeFile(listPath(userId), JSON.stringify(list, null, 2))
-}
-
-async function saveVectors(
-  docId: string,
-  entries: VectorEntry[],
-  userId?: string
-) {
-  const file = path.join(vectorsDir(userId), `${docId}.jsonl`)
-  const lines = entries.map((e) => JSON.stringify(e)).join("\n") + "\n"
-  await fs.writeFile(file, lines)
-}
-
-async function loadAllVectors(
-  userId?: string
-): Promise<VectorEntry[]> {
-  const dir = vectorsDir(userId)
-  let files: string[]
-  try {
-    files = await fs.readdir(dir)
-  } catch {
-    return []
-  }
-  const all: VectorEntry[] = []
-  for (const f of files) {
-    if (!f.endsWith(".jsonl")) continue
-    try {
-      const content = await fs.readFile(path.join(dir, f), "utf-8")
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        try {
-          all.push(JSON.parse(trimmed) as VectorEntry)
-        } catch {
-          // 忽略坏行
-        }
-      }
-    } catch {
-      // 忽略坏文件
-    }
-  }
-  return all
-}
-
 // ----------------------------------------------------------------------------
 // 公共 API
 // ----------------------------------------------------------------------------
@@ -163,10 +64,29 @@ export async function embedAndStore(
   text: string,
   userId?: string
 ): Promise<KnowledgeDoc> {
-  await ensureDirs(userId)
   const chunks = chunkText(text)
-  const entries: VectorEntry[] = []
+  const now = new Date().toISOString()
 
+  // 插入文档记录
+  const { data: docRow, error: docError } = await supabase
+    .from("knowledge_docs")
+    .upsert({
+      id: docId,
+      user_id: userId ?? null,
+      name: docName,
+      chunk_count: chunks.length,
+      size: Buffer.byteLength(text, "utf-8"),
+      created_at: now,
+    }, { onConflict: "id" })
+    .select()
+    .single()
+
+  if (docError) throw docError
+
+  // 先删除旧向量（如果重新上传）
+  await supabase.from("knowledge_vectors").delete().eq("doc_id", docId)
+
+  // 逐块向量化并插入
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]
     try {
@@ -174,67 +94,51 @@ export async function embedAndStore(
         model: "text-embedding-3-small",
         value: chunk,
       })
-      entries.push({
+      const { error: vecError } = await supabase.from("knowledge_vectors").insert({
         id: `${docId}-${i}`,
-        docId,
+        doc_id: docId,
+        user_id: userId ?? null,
         chunk,
         embedding,
-        createdAt: Date.now(),
+        created_at: now,
       })
+      if (vecError) throw vecError
     } catch (err) {
-      // embedding 失败：终止并抛给上层（通常是 API key 问题）
       throw err
     }
   }
 
-  // 1) 存文档原文
-  const docFile = path.join(docsDir(userId), `${docId}.txt`)
-  await fs.writeFile(docFile, text)
-
-  // 2) 存向量
-  await saveVectors(docId, entries, userId)
-
-  // 3) 更新列表
-  const list = await readList(userId)
-  const doc: KnowledgeDoc = {
-    id: docId,
-    name: docName,
-    chunkCount: entries.length,
-    size: Buffer.byteLength(text, "utf-8"),
-    createdAt: Date.now(),
-  }
-  list.unshift(doc)
-  await writeList(list, userId)
-
-  return doc
+  return toDoc(docRow as unknown as DBKnowledgeDoc)
 }
 
 // 列出所有文档
 export async function listDocs(
   userId?: string
 ): Promise<KnowledgeDoc[]> {
-  return readList(userId)
+  let query = supabase.from("knowledge_docs").select()
+  if (userId) {
+    query = query.eq("user_id", userId)
+  } else {
+    query = query.is("user_id", null)
+  }
+  const { data, error } = await query.order("created_at", { ascending: false })
+
+  if (error || !data) return []
+  return (data as unknown as DBKnowledgeDoc[]).map(toDoc)
 }
 
-// 删除文档 + 向量 + 原文
+// 删除文档 + 向量（CASCADE 自动删向量）
 export async function deleteDoc(
   docId: string,
   userId?: string
 ): Promise<boolean> {
-  await ensureDirs(userId)
-  const list = await readList(userId)
-  const idx = list.findIndex((d) => d.id === docId)
-  if (idx === -1) return false
-  list.splice(idx, 1)
-  await writeList(list, userId)
+  const { error } = await supabase
+    .from("knowledge_docs")
+    .delete()
+    .eq("id", docId)
+    .eq("user_id", userId ?? null)
 
-  const vectorFile = path.join(vectorsDir(userId), `${docId}.jsonl`)
-  const docFile = path.join(docsDir(userId), `${docId}.txt`)
-  await Promise.all([
-    fs.unlink(vectorFile).catch(() => {}),
-    fs.unlink(docFile).catch(() => {}),
-  ])
-  return true
+  return !error
 }
 
 export interface SearchHit {
@@ -244,25 +148,37 @@ export interface SearchHit {
   score: number
 }
 
-// 语义检索 top-K
+// 语义检索 top-K（使用 pgvector 的余弦距离运算符 <=>）
 export async function retrieve(
   query: string,
   topK = 5,
   userId?: string
 ): Promise<SearchHit[]> {
   if (!query || !query.trim()) return []
+
   const { embedding } = await embed({
     model: "text-embedding-3-small",
     value: query,
   })
-  const all = await loadAllVectors(userId)
-  if (all.length === 0) return []
-  const scored: SearchHit[] = all.map((v) => ({
-    id: v.id,
-    docId: v.docId,
-    chunk: v.chunk,
-    score: cosineSimilarity(embedding, v.embedding),
+
+  // 使用 RPC 调用 pgvector 的余弦距离检索
+  const { data, error } = await supabase.rpc("match_knowledge_vectors", {
+    query_embedding: embedding,
+    match_count: topK,
+    filter_user_id: userId ?? null,
+  })
+
+  if (error || !data) return []
+
+  return (data as Array<{
+    id: string
+    doc_id: string
+    chunk: string
+    similarity: number
+  }>).map((row) => ({
+    id: row.id,
+    docId: row.doc_id,
+    chunk: row.chunk,
+    score: row.similarity,
   }))
-  scored.sort((a, b) => b.score - a.score)
-  return scored.slice(0, topK)
 }

@@ -1,49 +1,11 @@
 // ============================================================================
-// 存储抽象层 — 使用文件系统 JSON 持久化，本地开发零依赖
-// 生产环境可替换为 Vercel KV / PostgreSQL
-// 按 userId 隔离：文件路径 .data/users/{userId}/...
+// 存储抽象层 — Supabase PostgreSQL 持久化
+// 按 userId 隔离：chats / memories / prompt_templates
 // ============================================================================
 
 import "server-only"
-import { promises as fs } from "fs"
-import path from "path"
 import type { UIMessage } from "ai"
-
-const DATA_DIR = path.join(process.cwd(), ".data")
-
-function userDir(userId: string): string {
-  // 对 userId 做 hash，避免特殊字符
-  const hash = require("crypto")
-    .createHash("sha256")
-    .update(userId)
-    .digest("hex")
-    .slice(0, 12)
-  return path.join(DATA_DIR, "users", hash)
-}
-
-function chatsDir(userId: string): string {
-  return path.join(userDir(userId), "chats")
-}
-
-function memoryDir(userId: string): string {
-  return path.join(userDir(userId), "memory")
-}
-
-async function ensureDir(dir: string) {
-  await fs.mkdir(dir, { recursive: true })
-}
-
-// 未登录共享目录（向后兼容）
-const ANON_CHATS_DIR = path.join(DATA_DIR, "chats")
-const ANON_MEMORY_DIR = path.join(DATA_DIR, "memory")
-
-function getChatsDir(userId?: string): string {
-  return userId ? chatsDir(userId) : ANON_CHATS_DIR
-}
-
-function getMemoryDir(userId?: string): string {
-  return userId ? memoryDir(userId) : ANON_MEMORY_DIR
-}
+import { supabase } from "@/lib/db"
 
 // ============================================================================
 // 会话元数据
@@ -58,6 +20,34 @@ export interface ChatMeta {
   promptTemplateId?: string
 }
 
+interface DBChat {
+  id: string
+  user_id: string | null
+  title: string
+  messages: UIMessage[]
+  message_count: number
+  system_prompt: string | null
+  prompt_template_id: string | null
+  summary: string | null
+  summarized_count: number
+  summary_created_at: string | null
+  summary_updated_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+function toMeta(row: DBChat): ChatMeta {
+  return {
+    id: row.id,
+    title: row.title,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+    messageCount: row.message_count,
+    systemPrompt: row.system_prompt ?? undefined,
+    promptTemplateId: row.prompt_template_id ?? undefined,
+  }
+}
+
 // ============================================================================
 // 会话存储 — 读写聊天记录（按 userId 隔离）
 // ============================================================================
@@ -69,108 +59,113 @@ export async function saveChat(
   promptTemplateId?: string,
   userId?: string
 ): Promise<ChatMeta> {
-  const dir = getChatsDir(userId)
-  await ensureDir(dir)
-  const now = Date.now()
+  const now = new Date().toISOString()
 
-  const metaPath = path.join(dir, `${chatId}.meta.json`)
-  let meta: ChatMeta
-  try {
-    const existing = JSON.parse(await fs.readFile(metaPath, "utf-8"))
-    meta = {
-      ...existing,
-      updatedAt: now,
-      messageCount: messages.length,
-      title: title ?? existing.title,
-      systemPrompt: systemPrompt ?? existing.systemPrompt,
-      promptTemplateId: promptTemplateId ?? existing.promptTemplateId,
-    }
-  } catch {
-    meta = {
-      id: chatId,
-      title: title ?? "新对话",
-      createdAt: now,
-      updatedAt: now,
-      messageCount: messages.length,
-      systemPrompt,
-      promptTemplateId,
-    }
+  // 查询是否已存在
+  const { data: existing } = await supabase
+    .from("chats")
+    .select()
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+    .maybeSingle()
+
+  const updateData: Record<string, unknown> = {
+    messages,
+    message_count: messages.length,
+    updated_at: now,
+  }
+  if (title !== undefined) updateData.title = title
+  if (systemPrompt !== undefined) updateData.system_prompt = systemPrompt
+  if (promptTemplateId !== undefined) updateData.prompt_template_id = promptTemplateId
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from("chats")
+      .update(updateData)
+      .eq("id", chatId)
+      .select()
+      .single()
+    if (error) throw error
+    return toMeta(data)
   }
 
-  await Promise.all([
-    fs.writeFile(
-      path.join(dir, `${chatId}.messages.json`),
-      JSON.stringify(messages)
-    ),
-    fs.writeFile(metaPath, JSON.stringify(meta)),
-  ])
+  const { data, error } = await supabase
+    .from("chats")
+    .insert({
+      id: chatId,
+      user_id: userId ?? null,
+      title: title ?? "新对话",
+      messages,
+      message_count: messages.length,
+      system_prompt: systemPrompt ?? null,
+      prompt_template_id: promptTemplateId ?? null,
+      created_at: now,
+      updated_at: now,
+    })
+    .select()
+    .single()
 
-  return meta
+  if (error) throw error
+  return toMeta(data)
 }
 
 export async function loadChat(
   chatId: string,
   userId?: string
 ): Promise<UIMessage[]> {
-  try {
-    const content = await fs.readFile(
-      path.join(getChatsDir(userId), `${chatId}.messages.json`),
-      "utf-8"
-    )
-    return JSON.parse(content) as UIMessage[]
-  } catch {
-    return []
-  }
+  const { data, error } = await supabase
+    .from("chats")
+    .select("messages")
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+    .maybeSingle()
+
+  if (error || !data) return []
+  return (data.messages as UIMessage[]) ?? []
 }
 
 export async function listChats(userId?: string): Promise<ChatMeta[]> {
-  const dir = getChatsDir(userId)
-  try {
-    const files = await fs.readdir(dir)
-    const metaFiles = files.filter((f) => f.endsWith(".meta.json"))
-    const metas = await Promise.all(
-      metaFiles.map(async (f) => {
-        const content = await fs.readFile(path.join(dir, f), "utf-8")
-        return JSON.parse(content) as ChatMeta
-      })
-    )
-    return metas.sort((a, b) => b.updatedAt - a.updatedAt)
-  } catch {
-    return []
+  let query = supabase.from("chats").select()
+  if (userId) {
+    query = query.eq("user_id", userId)
+  } else {
+    query = query.is("user_id", null)
   }
+  const { data, error } = await query.order("updated_at", { ascending: false })
+
+  if (error || !data) return []
+  return (data as unknown as DBChat[]).map(toMeta)
 }
 
 export async function deleteChat(
   chatId: string,
   userId?: string
 ): Promise<void> {
-  const dir = getChatsDir(userId)
-  await ensureDir(dir)
-  const tasks: Promise<void>[] = [
-    fs.unlink(path.join(dir, `${chatId}.messages.json`)).catch(() => {}),
-    fs.unlink(path.join(dir, `${chatId}.meta.json`)).catch(() => {}),
-    fs.unlink(path.join(dir, `${chatId}.summary.json`)).catch(() => {}),
-  ]
-  await Promise.all(tasks)
+  const { error } = await supabase
+    .from("chats")
+    .delete()
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+  if (error) throw error
 }
 
 export async function getChatMeta(
   chatId: string,
   userId?: string
 ): Promise<ChatMeta | null> {
-  try {
-    const content = await fs.readFile(
-      path.join(getChatsDir(userId), `${chatId}.meta.json`),
-      "utf-8"
-    )
-    return JSON.parse(content) as ChatMeta
-  } catch {
-    return null
-  }
+  const { data, error } = await supabase
+    .from("chats")
+    .select()
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return toMeta(data as unknown as DBChat)
 }
 
 // ============================================================================
-// 摘要缓存
+// 摘要缓存（存储在 chats 表的 summary 列）
 // ============================================================================
 export interface SummaryCache {
   chatId: string
@@ -184,14 +179,24 @@ export async function loadSummary(
   chatId: string,
   userId?: string
 ): Promise<SummaryCache | null> {
-  try {
-    const content = await fs.readFile(
-      path.join(getChatsDir(userId), `${chatId}.summary.json`),
-      "utf-8"
-    )
-    return JSON.parse(content) as SummaryCache
-  } catch {
-    return null
+  const { data, error } = await supabase
+    .from("chats")
+    .select("summary, summarized_count, summary_created_at, summary_updated_at")
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+    .maybeSingle()
+
+  if (error || !data || !data.summary) return null
+  return {
+    chatId,
+    summary: data.summary,
+    summarizedCount: data.summarized_count ?? 0,
+    createdAt: data.summary_created_at
+      ? new Date(data.summary_created_at).getTime()
+      : Date.now(),
+    updatedAt: data.summary_updated_at
+      ? new Date(data.summary_updated_at).getTime()
+      : Date.now(),
   }
 }
 
@@ -201,31 +206,54 @@ export async function saveSummary(
   summarizedCount: number,
   userId?: string
 ): Promise<SummaryCache> {
-  const dir = getChatsDir(userId)
-  await ensureDir(dir)
-  const now = Date.now()
-  const existing = await loadSummary(chatId, userId)
-  const entry: SummaryCache = {
+  const now = new Date().toISOString()
+
+  const { data: existing } = await supabase
+    .from("chats")
+    .select("summary_created_at")
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+    .maybeSingle()
+
+  const createdAt = existing?.summary_created_at ?? now
+
+  const { error } = await supabase
+    .from("chats")
+    .update({
+      summary,
+      summarized_count: summarizedCount,
+      summary_created_at: createdAt,
+      summary_updated_at: now,
+      updated_at: now,
+    })
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
+
+  if (error) throw error
+
+  return {
     chatId,
     summary,
     summarizedCount,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
+    createdAt: new Date(createdAt).getTime(),
+    updatedAt: new Date(now).getTime(),
   }
-  await fs.writeFile(
-    path.join(dir, `${chatId}.summary.json`),
-    JSON.stringify(entry)
-  )
-  return entry
 }
 
 export async function deleteSummary(
   chatId: string,
   userId?: string
 ): Promise<void> {
-  await fs
-    .unlink(path.join(getChatsDir(userId), `${chatId}.summary.json`))
-    .catch(() => {})
+  await supabase
+    .from("chats")
+    .update({
+      summary: null,
+      summarized_count: 0,
+      summary_created_at: null,
+      summary_updated_at: null,
+    })
+    .eq("id", chatId)
+    .eq("user_id", userId ?? null)
 }
 
 // ============================================================================
@@ -240,56 +268,68 @@ export interface MemoryEntry {
   updatedAt: number
 }
 
+interface DBMemory {
+  id: string
+  user_id: string | null
+  type: string
+  key: string
+  value: string
+  created_at: string
+  updated_at: string
+}
+
+function toMemoryEntry(row: DBMemory): MemoryEntry {
+  return {
+    id: row.id,
+    type: row.type as MemoryEntry["type"],
+    key: row.key,
+    value: row.value,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  }
+}
+
 export async function saveMemory(
   entry: Omit<MemoryEntry, "id" | "createdAt" | "updatedAt">,
   userId?: string
 ): Promise<MemoryEntry> {
-  const dir = getMemoryDir(userId)
-  await ensureDir(dir)
-  const indexPath = path.join(dir, "index.json")
+  const now = new Date().toISOString()
+  const id = `${entry.type}-${entry.key}-${Date.now()}`
 
-  let entries: MemoryEntry[] = []
-  try {
-    entries = JSON.parse(await fs.readFile(indexPath, "utf-8"))
-  } catch {
-    // 首次创建
-  }
+  const { data, error } = await supabase
+    .from("memories")
+    .upsert(
+      {
+        id,
+        user_id: userId ?? null,
+        type: entry.type,
+        key: entry.key,
+        value: entry.value,
+        created_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,type,key" }
+    )
+    .select()
+    .single()
 
-  const now = Date.now()
-  const existingIdx = entries.findIndex(
-    (e) => e.type === entry.type && e.key === entry.key
-  )
-
-  let result: MemoryEntry
-  if (existingIdx >= 0) {
-    result = { ...entries[existingIdx], value: entry.value, updatedAt: now }
-    entries[existingIdx] = result
-  } else {
-    result = {
-      ...entry,
-      id: `${entry.type}-${entry.key}-${now}`,
-      createdAt: now,
-      updatedAt: now,
-    }
-    entries.push(result)
-  }
-
-  await fs.writeFile(indexPath, JSON.stringify(entries))
-  return result
+  if (error) throw error
+  return toMemoryEntry(data as unknown as DBMemory)
 }
 
 export async function loadAllMemories(
   userId?: string
 ): Promise<MemoryEntry[]> {
-  try {
-    const content = await fs.readFile(
-      path.join(getMemoryDir(userId), "index.json"),
-      "utf-8"
-    )
-    return JSON.parse(content) as MemoryEntry[]
-  } catch {
-    return []
+  let query = supabase.from("memories").select()
+  if (userId) {
+    query = query.eq("user_id", userId)
+  } else {
+    query = query.is("user_id", null)
   }
+  const { data, error } = await query.order("created_at", { ascending: false })
+
+  if (error || !data) return []
+  return (data as unknown as DBMemory[]).map(toMemoryEntry)
 }
 
 export async function searchMemories(
@@ -320,24 +360,43 @@ export interface CustomPromptTemplate {
   custom?: true
 }
 
-const ANON_TEMPLATES_PATH = path.join(DATA_DIR, "prompt-templates.json")
+interface DBTemplate {
+  id: string
+  user_id: string | null
+  name: string
+  icon: string | null
+  description: string | null
+  system_prompt: string
+  created_at: string
+  updated_at: string
+}
 
-function getTemplatesPath(userId?: string): string {
-  if (userId) {
-    return path.join(userDir(userId), "prompt-templates.json")
+function toTemplate(row: DBTemplate): CustomPromptTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    icon: row.icon ?? "",
+    description: row.description ?? "",
+    systemPrompt: row.system_prompt,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+    custom: true,
   }
-  return ANON_TEMPLATES_PATH
 }
 
 export async function listCustomTemplates(
   userId?: string
 ): Promise<CustomPromptTemplate[]> {
-  try {
-    const content = await fs.readFile(getTemplatesPath(userId), "utf-8")
-    return JSON.parse(content) as CustomPromptTemplate[]
-  } catch {
-    return []
+  let query = supabase.from("prompt_templates").select()
+  if (userId) {
+    query = query.eq("user_id", userId)
+  } else {
+    query = query.is("user_id", null)
   }
+  const { data, error } = await query.order("created_at", { ascending: false })
+
+  if (error || !data) return []
+  return (data as unknown as DBTemplate[]).map(toTemplate)
 }
 
 export async function saveCustomTemplate(
@@ -346,49 +405,63 @@ export async function saveCustomTemplate(
   },
   userId?: string
 ): Promise<CustomPromptTemplate> {
-  const filePath = getTemplatesPath(userId)
-  const dir = path.dirname(filePath)
-  await ensureDir(dir)
-
-  const templates = await listCustomTemplates(userId)
-  const now = Date.now()
+  const now = new Date().toISOString()
 
   if (template.id) {
-    const idx = templates.findIndex((t) => t.id === template.id)
-    if (idx >= 0) {
-      const updated: CustomPromptTemplate = {
-        ...templates[idx],
-        ...template,
-        updatedAt: now,
-        custom: true,
-      }
-      templates[idx] = updated
-      await fs.writeFile(filePath, JSON.stringify(templates))
-      return updated
+    const { data: existing } = await supabase
+      .from("prompt_templates")
+      .select()
+      .eq("id", template.id)
+      .eq("user_id", userId ?? null)
+      .maybeSingle()
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from("prompt_templates")
+        .update({
+          name: template.name,
+          icon: template.icon,
+          description: template.description,
+          system_prompt: template.systemPrompt,
+          updated_at: now,
+        })
+        .eq("id", template.id)
+        .select()
+        .single()
+
+      if (error) throw error
+      return toTemplate(data as unknown as DBTemplate)
     }
   }
 
-  const created: CustomPromptTemplate = {
-    ...template,
-    id: `tmpl-${now}-${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: now,
-    updatedAt: now,
-    custom: true,
-  }
-  templates.push(created)
-  await fs.writeFile(filePath, JSON.stringify(templates))
-  return created
+  const newId = template.id ?? `tmpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const { data, error } = await supabase
+    .from("prompt_templates")
+    .insert({
+      id: newId,
+      user_id: userId ?? null,
+      name: template.name,
+      icon: template.icon,
+      description: template.description,
+      system_prompt: template.systemPrompt,
+      created_at: now,
+      updated_at: now,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return toTemplate(data as unknown as DBTemplate)
 }
 
 export async function deleteCustomTemplate(
   templateId: string,
   userId?: string
 ): Promise<void> {
-  const templates = await listCustomTemplates(userId)
-  const filtered = templates.filter((t) => t.id !== templateId)
-  if (filtered.length === templates.length) return
-  const filePath = getTemplatesPath(userId)
-  const dir = path.dirname(filePath)
-  await ensureDir(dir)
-  await fs.writeFile(filePath, JSON.stringify(filtered))
+  const { error } = await supabase
+    .from("prompt_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("user_id", userId ?? null)
+  if (error) throw error
 }
