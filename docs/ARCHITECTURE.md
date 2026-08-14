@@ -341,7 +341,7 @@ npx shadcn@latest add <component-name>
 
 | 框架 | 主语言 | 运行时 | 包管理 | 社区规模 (GitHub Stars) | 生态成熟度 |
 |------|--------|--------|--------|--------------------------|------------|
-| **本项目** | TypeScript | Node.js / Edge | pnpm | — | 高（AI SDK 生态） |
+| **本项目** | TypeScript | Node.js / Edge | yarn | — | 高（AI SDK 生态） |
 | **Mastra** | TypeScript | Node.js | npm | ~27k | 成长中 |
 | **LangChain** | Python / TS | Python / Node | pip / npm | ~98k | 非常成熟 |
 | **LangGraph** | Python / TS | Python / Node | pip / npm | ~39k | 成熟 |

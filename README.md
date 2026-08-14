@@ -24,7 +24,7 @@ That's it — no configuration needed. Vercel deployments authenticate to the AI
 ## Local development
 
 ```bash
-pnpm install
+yarn install
 ```
 
 Then give the app a gateway credential, either by pulling an OIDC token from your linked Vercel project:
@@ -44,7 +44,7 @@ cp .env.example .env.local
 Start the dev server:
 
 ```bash
-pnpm dev
+yarn dev
 ```
 
 ## Configuration
