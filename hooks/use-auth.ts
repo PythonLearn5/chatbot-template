@@ -65,10 +65,16 @@ export function useAuth(): {
   setAuth: (u: AuthUser | null) => void
   refresh: () => Promise<AuthUser | null>
 } {
-  const [user, setUser] = React.useState<AuthUser | null>(() => readStorage())
+  const [user, setUser] = React.useState<AuthUser | null>(null)
+  const [mounted, setMounted] = React.useState(false)
 
-  // 服务器校验 + 监听事件
   React.useEffect(() => {
+    setMounted(true)
+    setUser(readStorage())
+  }, [])
+
+  React.useEffect(() => {
+    if (!mounted) return
     let alive = true
     refreshAuthFromServer().then((u) => {
       if (alive) setUser(u)
@@ -76,13 +82,13 @@ export function useAuth(): {
 
     const onSync = () => setUser(readStorage())
     window.addEventListener(EVENT_NAME, onSync)
-    window.addEventListener("storage", onSync) // 跨 Tab
+    window.addEventListener("storage", onSync)
     return () => {
       alive = false
       window.removeEventListener(EVENT_NAME, onSync)
       window.removeEventListener("storage", onSync)
     }
-  }, [])
+  }, [mounted])
 
   const setAuth = React.useCallback((u: AuthUser | null) => {
     writeStorage(u)
