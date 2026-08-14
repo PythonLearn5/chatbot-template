@@ -72,7 +72,7 @@ export async function POST(req: Request) {
   }
 
   const model = (body as { model?: unknown })?.model
-  const modelId = typeof model === "string" ? model : DEFAULT_MODEL
+  let modelId = typeof model === "string" ? model : DEFAULT_MODEL
   if (!isModelAllowed(modelId)) {
     return Response.json(
       { error: `Model ${modelId} is not available.` },
@@ -125,6 +125,40 @@ export async function POST(req: Request) {
 
   // ── Phase 2：上下文窗口管理（裁剪 + 摘要）─────────────────────
   let modelMessages = await convertToModelMessages(messages)
+  // Fix: 规范化 content 中的 file/image data URL，避免被错误包装为 { type: "url", url: "data:..." }
+  modelMessages = normalizeModelMessageContent(modelMessages)
+
+  // Fix: Anthropic/Claude 当前通过 Gateway 发送含图片/文件的消息时会触发
+  // `code-execution-web-tools-2026-02-09` beta header 冲突导致 HTTP 500。
+  // 检测到此组合时自动切换到支持视觉的 GPT 5.6 Terra，保证用户无感知地获得正常响应。
+  const hasVisualParts = modelMessages.some(
+    (m) =>
+      Array.isArray((m as { content?: unknown }).content) &&
+      ((m as { content: Array<{ type: string; mediaType?: string }> }).content.some(
+        (p) =>
+          p.type === "image" ||
+          (p.type === "file" && p.mediaType?.startsWith("image/"))
+      ) ||
+        (m as { content: Array<{ type: string; data?: { type?: string; url?: unknown } }> }).content.some(
+          (p) =>
+            p.type === "file" &&
+            p.data?.type === "url" &&
+            typeof p.data.url === "string" &&
+            p.data.url.startsWith("data:image/")
+        ) ||
+        (m as { content: Array<{ type: string; data?: { type?: string; data?: unknown } }> }).content.some(
+          (p) => p.type === "file" && p.data?.type === "data"
+        ))
+  )
+  let visualFallbackNote: string | undefined
+  if (modelId.startsWith("anthropic/") && hasVisualParts) {
+    const fallback = "openai/gpt-5.6-terra"
+    if (isModelAllowed(fallback)) {
+      visualFallbackNote = `（系统提示：由于当前选择的 ${modelId} 模型暂不支持图片消息格式，已自动切换到 ${fallback} 处理本次请求。）`
+      ;(modelId as string) = fallback
+    }
+  }
+
   let summarySystemPrompt: string | undefined
 
   if (modelMessages.length > SUMMARY_THRESHOLD && chatIdStr) {
@@ -184,6 +218,12 @@ export async function POST(req: Request) {
 
   // ── 模块 6 + 摘要 + 记忆：构建 system prompt ──────────────────
   const systemParts: string[] = []
+
+  if (visualFallbackNote) {
+    systemParts.push(
+      `【重要】请在回复的开头（第一行）单独用一行小字或括号告知用户：${visualFallbackNote}，然后再正常回答问题。`
+    )
+  }
 
   if (chatIdStr) {
     try {
@@ -291,6 +331,17 @@ export async function POST(req: Request) {
         }
       },
       onError: (error) => {
+        const errText = String(error || "")
+        const isGateway500 = errText.includes("GatewayInternalServerError") || errText.includes("anthropic-beta")
+        const isNetworkErr = errText.includes("fetch") || errText.includes("network")
+        let msg = "出错了，请稍后重试。"
+        if (isGateway500) {
+          msg = "模型请求失败：当前模型不支持该格式的图片消息，请尝试切换到其他模型（如 GPT）或仅发送纯文本。"
+        } else if (isNetworkErr) {
+          msg = "网络连接异常，请检查网络后重试。"
+        } else if (errText && errText.length < 200) {
+          msg = `请求失败：${errText}`
+        }
         logRequest({
           timestamp: startTime,
           chatId: chatIdStr,
@@ -300,7 +351,7 @@ export async function POST(req: Request) {
           status: "error",
           error: String(error),
         }).catch(() => {})
-        return "出错了，请稍后重试。"
+        return msg
       },
     }),
   })
@@ -330,4 +381,79 @@ function formatMessagesForSummary(
       return `[${role}] ${text}`
     })
     .join("\n")
+}
+
+// 辅助函数：规范化 content 中 file/image 部分的 data URL，
+// 将 { type: "url", url: "data:..." } STRING 转为 { type: "data", data: "<base64>" }，
+// 以避免部分 provider/gateway 解析错误（如 Anthropic anthropic-beta 冲突）。
+function normalizeModelMessageContent<T extends Array<{ role: string; content: unknown }>>(
+  messages: T
+): T {
+  return messages.map((msg) => {
+    if (
+      (msg.role === "user" || msg.role === "assistant") &&
+      Array.isArray(msg.content)
+    ) {
+      const newContent = (msg.content as Array<Record<string, unknown>>).map(
+        (part) => {
+          if (
+            part.type === "file" &&
+            typeof part.data === "object" &&
+            part.data !== null
+          ) {
+            const data = part.data as { type: string; url?: unknown }
+            if (data.type === "url") {
+              const urlStr = String(data.url ?? "")
+              const match =
+                /^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,([\s\S]*)$/.exec(
+                  urlStr
+                )
+              if (match) {
+                const [, rawMediaType, base64Flag, rawPayload] = match
+                const mediaType = rawMediaType
+                  ? rawMediaType.split(";")[0]
+                  : undefined
+                const payload =
+                  base64Flag
+                    ? rawPayload
+                    : btoa(unescape(encodeURIComponent(rawPayload)))
+                return {
+                  ...part,
+                  mediaType: (part.mediaType as string) || mediaType,
+                  data: { type: "data" as const, data: payload },
+                }
+              }
+            }
+          }
+          if (
+            part.type === "image" &&
+            typeof part.image === "string" &&
+            part.image.startsWith("data:")
+          ) {
+            const urlStr = part.image
+            const match =
+              /^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,([\s\S]*)$/.exec(urlStr)
+            if (match) {
+              const [, rawMediaType, base64Flag, rawPayload] = match
+              const mediaType = rawMediaType
+                ? rawMediaType.split(";")[0]
+                : undefined
+              const payload =
+                base64Flag
+                  ? rawPayload
+                  : btoa(unescape(encodeURIComponent(rawPayload)))
+              return {
+                ...part,
+                mediaType: (part.mediaType as string) || mediaType,
+                image: { type: "data" as const, data: payload },
+              }
+            }
+          }
+          return part
+        }
+      )
+      return { ...msg, content: newContent }
+    }
+    return msg
+  }) as T
 }
