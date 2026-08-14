@@ -305,3 +305,90 @@ export async function searchMemories(
       e.type.toLowerCase().includes(q)
   )
 }
+
+// ============================================================================
+// 自定义角色模板 — 按 userId 隔离
+// ============================================================================
+export interface CustomPromptTemplate {
+  id: string
+  name: string
+  icon: string
+  description: string
+  systemPrompt: string
+  createdAt: number
+  updatedAt: number
+  custom?: true
+}
+
+const ANON_TEMPLATES_PATH = path.join(DATA_DIR, "prompt-templates.json")
+
+function getTemplatesPath(userId?: string): string {
+  if (userId) {
+    return path.join(userDir(userId), "prompt-templates.json")
+  }
+  return ANON_TEMPLATES_PATH
+}
+
+export async function listCustomTemplates(
+  userId?: string
+): Promise<CustomPromptTemplate[]> {
+  try {
+    const content = await fs.readFile(getTemplatesPath(userId), "utf-8")
+    return JSON.parse(content) as CustomPromptTemplate[]
+  } catch {
+    return []
+  }
+}
+
+export async function saveCustomTemplate(
+  template: Omit<CustomPromptTemplate, "id" | "createdAt" | "updatedAt"> & {
+    id?: string
+  },
+  userId?: string
+): Promise<CustomPromptTemplate> {
+  const filePath = getTemplatesPath(userId)
+  const dir = path.dirname(filePath)
+  await ensureDir(dir)
+
+  const templates = await listCustomTemplates(userId)
+  const now = Date.now()
+
+  if (template.id) {
+    const idx = templates.findIndex((t) => t.id === template.id)
+    if (idx >= 0) {
+      const updated: CustomPromptTemplate = {
+        ...templates[idx],
+        ...template,
+        updatedAt: now,
+        custom: true,
+      }
+      templates[idx] = updated
+      await fs.writeFile(filePath, JSON.stringify(templates))
+      return updated
+    }
+  }
+
+  const created: CustomPromptTemplate = {
+    ...template,
+    id: `tmpl-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: now,
+    updatedAt: now,
+    custom: true,
+  }
+  templates.push(created)
+  await fs.writeFile(filePath, JSON.stringify(templates))
+  return created
+}
+
+export async function deleteCustomTemplate(
+  templateId: string,
+  userId?: string
+): Promise<void> {
+  const templates = await listCustomTemplates(userId)
+  const filtered = templates.filter((t) => t.id !== templateId)
+  if (filtered.length === templates.length) return
+  const filePath = getTemplatesPath(userId)
+  const dir = path.dirname(filePath)
+  await ensureDir(dir)
+  await fs.writeFile(filePath, JSON.stringify(filtered))
+}
