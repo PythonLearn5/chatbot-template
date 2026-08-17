@@ -1,9 +1,11 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
+import { headers } from "next/headers"
 
 import { MODELS } from "@/lib/models"
 import { Chat } from "@/components/chat"
 import { loadChat } from "@/lib/storage"
+import { authenticateUser } from "@/lib/auth"
 import type { ChatUIMessage } from "@/tools"
 
 export const metadata: Metadata = {
@@ -19,9 +21,16 @@ export default async function ChatPage({
   params: Promise<{ chatId: string }>
 }) {
   const { chatId } = await params
-  const messages = await loadChat(chatId)
+  const reqHeaders = await headers()
+  const user = await authenticateUser(
+    new Request("https://placeholder", { headers: reqHeaders })
+  )
+  const messages = await loadChat(chatId, user?.id)
 
-  // 会话不存在时加载空数组，Chat 组件会显示空状态
+  if (messages.length === 0) {
+    notFound()
+  }
+
   return (
     <Chat
       models={MODELS}
