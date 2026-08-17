@@ -41,6 +41,31 @@ export async function POST(req: Request) {
   }
 }
 
+export async function PATCH(req: Request) {
+  try {
+    const body = (await req.json()) as { id?: string; enabled?: boolean }
+    if (!body.id) {
+      return NextResponse.json({ error: "ID required." }, { status: 400 })
+    }
+    const all = await listMCPServers()
+    const target = all.find((s) => s.id === body.id)
+    if (!target) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 })
+    }
+    const updated: MCPServerConfig = {
+      ...target,
+      enabled: body.enabled !== undefined ? body.enabled : target.enabled,
+    }
+    await saveMCPServer(updated)
+    return NextResponse.json(updated)
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to update MCP server." },
+      { status: 500 }
+    )
+  }
+}
+
 export async function DELETE(req: Request) {
   const url = new URL(req.url)
   const id = url.searchParams.get("id")
