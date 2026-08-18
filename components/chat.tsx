@@ -6,7 +6,7 @@ import { lastAssistantMessageIsCompleteWithToolCalls } from "ai"
 import Link from "next/link"
 import { LogInIcon, UserPlusIcon } from "lucide-react"
 
-import { type GatewayModel } from "@/lib/models"
+import { DEFAULT_MODEL, type GatewayModel } from "@/lib/models"
 import { type ChatUIMessage } from "@/tools"
 import { ChatMessage } from "@/components/chat-message"
 import { PromptForm, type ImageAttachment } from "@/components/prompt-form"
@@ -40,7 +40,7 @@ export function Chat({
   chatId?: string
   initialMessages?: ChatUIMessage[]
 }) {
-  const [model, setModel] = React.useState(models[0]?.id ?? "")
+  const [model, setModel] = React.useState(DEFAULT_MODEL)
 
   // Phase 1: 传入 chatId 和 initialMessages 实现持久化
   // chatId 变化时 useChat 会重新创建实例，加载新的历史消息

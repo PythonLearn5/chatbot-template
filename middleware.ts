@@ -53,8 +53,8 @@ function isProtectedApi(path: string): boolean {
   )
 }
 
-// 32 位 hex（和 lib/auth.ts 生成的 token 格式一致）
-const HEX32 = /^[a-f0-9]{32}$/i
+// 64 位 hex（crypto.randomBytes(32).toString("hex") 生成 32 字节 = 64 hex 字符）
+const HEX_TOKEN = /^[a-f0-9]{64}$/i
 
 export function middleware(req: NextRequest): NextResponse | undefined {
   const { pathname } = req.nextUrl
@@ -71,7 +71,7 @@ export function middleware(req: NextRequest): NextResponse | undefined {
   // 受保护 API：检查 auth-token cookie
   if (isProtectedApi(pathname)) {
     const token = req.cookies.get("auth-token")?.value
-    if (!token || !HEX32.test(token)) {
+    if (!token || !HEX_TOKEN.test(token)) {
       return NextResponse.json(
         { error: "未登录：请先点击右上角登录后再使用此功能。" },
         { status: 401 }

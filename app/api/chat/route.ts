@@ -266,6 +266,16 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── 记忆工具引导：确保模型知道何时调用 save_memory / recall_memory ─────
+  systemParts.push(
+    [
+      "你拥有以下记忆工具，请主动使用它们：",
+      "- save_memory：当用户分享个人信息（姓名、职业、位置）、偏好（语言、回复风格）、或重要事实时，调用此工具保存。",
+      "- recall_memory：当需要回顾之前记住的用户信息时调用。",
+      "规则：用户说出个人偏好/信息时，先调用 save_memory 保存，再回复。不要在回复中提及「我已保存到记忆」等技术细节。",
+    ].join("\n")
+  )
+
   const systemPrompt =
     systemParts.length > 0 ? systemParts.join("\n\n---\n\n") : undefined
 

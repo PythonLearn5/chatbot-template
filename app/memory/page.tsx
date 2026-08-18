@@ -64,7 +64,11 @@ export default function MemoryPage() {
       if (res.ok) {
         const data = await res.json()
         setMemories(data.memories ?? [])
+      } else {
+        setMemories([])
       }
+    } catch {
+      setMemories([])
     } finally {
       setLoading(false)
     }

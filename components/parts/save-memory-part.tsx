@@ -14,16 +14,16 @@ export function SaveMemoryPart({ part }: { part: SaveMemoryToolPart }) {
         </div>
       )
     case "output-available": {
-      const output = part.output as { saved?: boolean; message?: string; error?: string }
-      if (output.error) {
+      const output = part.output as { saved?: boolean; error?: string }
+      if (output.saved === false) {
         return (
-          <div className="text-sm text-destructive">{output.error}</div>
+          <div className="text-sm text-destructive">记忆保存失败</div>
         )
       }
       return (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <CheckIcon className="size-4 text-green-500" />
-          <span>{output.message}</span>
+          <span>已记住</span>
         </div>
       )
     }

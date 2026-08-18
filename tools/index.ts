@@ -19,13 +19,13 @@ function scopedMemoryTools(userId?: string) {
       key: z.string(),
       value: z.string(),
     }),
-    outputSchema: z.object({ saved: z.boolean(), message: z.string() }),
+    outputSchema: z.object({ saved: z.boolean() }),
     execute: async ({ type, key, value }) => {
       try {
         await saveMemory({ type, key, value }, userId)
-        return { saved: true, message: `已记住：${type}/${key} = ${value}` }
+        return { saved: true }
       } catch {
-        return { saved: false, message: "记忆保存失败" }
+        return { saved: false }
       }
     },
   })

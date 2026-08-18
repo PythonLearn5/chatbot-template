@@ -93,7 +93,7 @@ export const MODELS = [
   },
 ]
 
-export const DEFAULT_MODEL = MODELS[0].id
+export const DEFAULT_MODEL = "alibaba/qwen3.8-27b"
 
 export interface GatewayModel {
   id: string
