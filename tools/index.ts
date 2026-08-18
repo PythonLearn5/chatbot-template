@@ -8,6 +8,7 @@ import { getWebSearch } from "./web_search"
 import { weather } from "./weather"
 import { saveMemoryTool, recallMemoryTool } from "./memory"
 import { createKnowledgeTool } from "./knowledge"
+import { codeRun } from "./code-run"
 import { saveMemory, searchMemories } from "@/lib/storage"
 
 // scoped 工具工厂：memory 工具按 userId 隔离
@@ -77,6 +78,7 @@ export function getTools(modelId: string, userId?: string): ToolSet {
     recall_memory,
     knowledge,
     web_search: webSearch,
+    code_run: codeRun,
   } as ToolSet
 }
 

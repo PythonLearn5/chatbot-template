@@ -13,6 +13,7 @@ export async function loadMCPTools(configs: MCPServerConfig[]) {
 
   for (const config of configs.filter((c) => c.enabled && c.url)) {
     try {
+      console.log(`[MCP] Connecting to ${config.name} (${config.transport}) at ${config.url}`)
       const client = await createMCPClient({
         transport: {
           type: config.transport === "streamable-http" ? "http" : "sse",
@@ -21,11 +22,13 @@ export async function loadMCPTools(configs: MCPServerConfig[]) {
       })
 
       const mcpTools = await client.tools()
+      const toolNames = Object.keys(mcpTools)
+      console.log(`[MCP] ${config.name}: loaded ${toolNames.length} tools: ${toolNames.join(", ")}`)
       for (const [name, tool] of Object.entries(mcpTools)) {
         tools[`${config.name}_${name}`] = tool
       }
-    } catch {
-      // MCP 服务器连接失败，跳过
+    } catch (err) {
+      console.error(`[MCP] Failed to connect to ${config.name} (${config.url}):`, err)
     }
   }
 

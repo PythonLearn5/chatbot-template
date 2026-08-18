@@ -138,15 +138,14 @@ export function Chat({
           </Empty>
         </div>
       ) : (
-        <MessageScrollerProvider>
+        <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-6">
-                {messages.map((message) => (
+                {messages.map((message, index) => (
                   <MessageScrollerItem
-                    key={message.id}
+                    key={message.id || `msg-${index}`}
                     messageId={message.id}
-                    scrollAnchor={message.role === "user"}
                   >
                     <ChatMessage
                       message={message}

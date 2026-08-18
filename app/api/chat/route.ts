@@ -276,6 +276,17 @@ export async function POST(req: Request) {
     ].join("\n")
   )
 
+  // ── 代码执行工具引导 ──────────────────────────────────────────
+  systemParts.push(
+    [
+      "你拥有 code_run 工具，可以在沙箱中执行 Python 和 JavaScript 代码：",
+      "- 当用户要求执行、运行、测试代码时，调用 code_run 工具。",
+      "- 支持语言：python、javascript。超时限制 10 秒，仅支持标准库。",
+      "- 将完整代码作为 code 参数传入，工具会返回 stdout/stderr/exitCode。",
+      "- 把执行结果中的 stdout 展示给用户。",
+    ].join("\n")
+  )
+
   const systemPrompt =
     systemParts.length > 0 ? systemParts.join("\n\n---\n\n") : undefined
 
