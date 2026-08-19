@@ -3,14 +3,6 @@
 INSERT INTO mcp_servers (id, name, transport, url, enabled, created_at)
 VALUES
   (
-    'kael-mcp',
-    'Kael MCP',
-    'sse',
-    'https://www.kael.ink/mcp/sse',
-    true,
-    now()
-  ),
-  (
     'toolkit-mcp',
     'Toolkit MCP',
     'streamable-http',
