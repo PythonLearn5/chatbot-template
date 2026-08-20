@@ -181,7 +181,7 @@ export function PromptForm({
             placeholder={
               supportsImages
                 ? "发送消息或拖拽/粘贴图片…"
-                : "发送消息…（图片上传仅支持 GPT / Claude 模型）"
+                : "发送消息…"
             }
             className="p-3.5"
             value={input}
