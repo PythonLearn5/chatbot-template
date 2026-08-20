@@ -91,10 +91,11 @@ CLI 会自动检测 Next.js 项目并创建新项目。
 |--------|------|--------|
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway API Key | `vck_xxxxxxxx` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL | `https://xxxx.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase 公开发布密钥 | `sb_publishable_xxxx` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务端密钥（**仅服务端使用**） | `eyJhbGciOi...` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务端密钥（**仅服务端使用，绕过 RLS**） | `eyJhbGciOi...` |
 
 > **安全提示**：`SUPABASE_SERVICE_ROLE_KEY` 可绕过 RLS，**切勿暴露到前端代码**。本项目已通过 `"server-only"` 限制仅服务端引用。
+
+> **注意**：本项目仅使用 `SUPABASE_SERVICE_ROLE_KEY`（服务端密钥），不使用 Supabase 公开发布密钥（`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`），因为所有数据库操作均在服务端完成。
 
 ### 拉取环境变量到本地
 
@@ -113,7 +114,6 @@ vercel env pull
 ```bash
 vercel env add AI_GATEWAY_API_KEY
 vercel env add NEXT_PUBLIC_SUPABASE_URL
-vercel env add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 vercel env add SUPABASE_SERVICE_ROLE_KEY
 ```
 
@@ -156,7 +156,7 @@ https://你的项目.vercel.app
 | 验证项 | 预期结果 |
 |--------|----------|
 | 访问首页 `/` | 显示聊天界面，无报错 |
-| 注册/登录 | 邮箱注册 → 登录成功 → 右上角显示用户名 |
+| 注册/登录 | 邮箱+密码注册 → 登录成功 → 右上角显示用户名 |
 | 新建对话 | 发送消息后收到 AI 回复 |
 | 历史会话 | 侧边栏可看到创建的会话，点击可加载 |
 | 知识库 `/knowledge` | 可上传文档、查看文档列表 |
@@ -168,7 +168,7 @@ https://你的项目.vercel.app
 
 ## 8. Supabase 数据库初始化（首次部署）
 
-首次部署前，确保 Supabase 项目已应用数据库迁移：
+首次部署前，确保 Supabase 项目已应用数据库迁移。
 
 ### 通过 Vercel MCP 工具应用
 
@@ -176,10 +176,11 @@ https://你的项目.vercel.app
 
 ### 手动应用
 
-在 Supabase Dashboard → SQL Editor 中执行：
+在 Supabase Dashboard → SQL Editor 中按顺序执行以下 3 个迁移文件：
 
 1. `supabase/migrations/001_init_schema.sql` — 创建 9 张表 + pgvector 扩展 + HNSW 索引
-2. `supabase/migrations/002_match_vectors.sql` — 创建向量检索 RPC 函数
+2. `supabase/migrations/002_match_vectors.sql` — 创建 `match_knowledge_vectors` 向量检索 RPC 函数
+3. `supabase/migrations/003_seed_mcp_servers.sql` — 插入 Toolkit MCP 种子数据
 
 ---
 
@@ -217,7 +218,7 @@ vercel domains     # 管理自定义域名
 
 ### Q: 登录注册页面不工作
 
-确认 `SUPABASE_SERVICE_ROLE_KEY` 已在 Vercel 环境变量中设置，且选择了 Production + Preview 环境。
+确认 `SUPABASE_SERVICE_ROLE_KEY` 已在 Vercel 环境变量中设置，且选择了 Production + Preview 环境。注册使用邮箱+密码方式。
 
 ### Q: 知识库上传后检索不到结果
 

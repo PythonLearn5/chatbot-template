@@ -1,44 +1,59 @@
-# Supabase 数据库升级方案
+# Supabase 数据库 Schema 参考
 
-> 文件存储 → Supabase (PostgreSQL + pgvector) 迁移指南
+> 文件存储 → Supabase (PostgreSQL + pgvector) 迁移**已完成**，所有代码均已使用 Supabase。
 
-## 一、背景与现状
+## 一、概述
 
-当前项目所有持久化数据均存储在文件系统 JSON 中（`.data/` 目录），涉及 5 个模块：
+本项目已完成从文件系统 JSON 存储（`.data/` 目录）到 Supabase（PostgreSQL + pgvector）的迁移。所有持久化数据现在均存储在 Supabase 数据库中，涉及以下模块：
 
-| 模块 | 数据 | 目录 |
-|------|------|------|
-| `lib/auth.ts` | 用户账号 + 会话令牌 | `.data/auth/users.json`, `tokens.json` |
-| `lib/storage.ts` | 聊天会话、记忆、摘要、提示词模板 | `.data/chats/`, `.data/memory/`, `.data/users/{hash}/` |
-| `lib/rag.ts` | 知识库文档 + 向量 | `.data/knowledge/`, `.data/users/{hash}/knowledge/` |
-| `lib/mcp-config.ts` | MCP 服务器配置 | `.data/mcp/servers.json` |
-| `lib/logger.ts` | 请求日志 | `.data/logs/requests.jsonl` |
-
-### 核心问题
-
-- **并发写竞争**：无文件锁，多请求同时写同一文件可能丢数据
-- **向量检索 O(n)**：每次检索将全部向量加载到内存做暴力余弦相似度
-- **无事务**：跨表/跨文件操作无法原子化
-- **无索引**：列表查询靠读全量 JSON 再内存过滤
-- **多实例不可行**：文件存储绑定单机，无法水平扩展
+| 模块 | 数据 | 对应表 |
+|------|------|--------|
+| `lib/auth.ts` | 用户账号 + 会话令牌 | `users`, `auth_tokens` |
+| `lib/storage.ts` | 聊天会话、记忆、摘要、提示词模板 | `chats`, `memories`, `prompt_templates` |
+| `lib/rag.ts` | 知识库文档 + 向量 | `knowledge_docs`, `knowledge_vectors` |
+| `lib/mcp-config.ts` | MCP 服务器配置 | `mcp_servers` |
+| `lib/logger.ts` | 请求日志 | `request_logs` |
 
 ---
 
-## 二、技术选型
+## 二、环境变量
 
-| 维度 | 方案 |
-|------|------|
-| 数据库 | Supabase (PostgreSQL) |
-| 向量检索 | pgvector 扩展 + HNSW 索引 |
-| 客户端 SDK | `@supabase/supabase-js`（服务端使用 `service_role` key） |
-| 多用户隔离 | 查询层 `user_id` 过滤（可选 RLS 策略） |
-| 密码哈希 | 保留 Node `crypto.scrypt`（不引入 bcrypt 依赖） |
+`.env.local`（或 Vercel 环境变量）需包含以下变量：
+
+| 变量名 | 说明 | 示例值 |
+|--------|------|--------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL | `https://xxxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务端密钥（**仅服务端使用，绕过 RLS**） | `eyJhbGciOi...` |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway API Key | `vck_xxxxxxxx` |
+
+> **安全提示**：`SUPABASE_SERVICE_ROLE_KEY` 可绕过 RLS，**切勿暴露到前端代码**。本项目已通过 `"server-only"` 限制仅服务端引用。
 
 ---
 
-## 三、数据库 Schema
+## 三、数据库客户端（lib/db.ts）
 
-### 3.1 用户表
+```ts
+import "server-only"
+import { createClient } from "@supabase/supabase-js"
+
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,  // 服务端绕过 RLS
+  { auth: { persistSession: false } }
+)
+```
+
+- 使用 `service_role` key，绕过行级安全（RLS）策略。
+- `{ auth: { persistSession: false } }` 禁用客户端会话持久化（服务端无需）。
+- `import "server-only"` 确保此模块仅在服务端引用，防止打包到客户端。
+
+---
+
+## 四、完整 Schema（9 张表）
+
+以下 Schema 来自实际迁移文件 `supabase/migrations/001_init_schema.sql`。
+
+### 4.1 用户表
 
 ```sql
 CREATE TABLE users (
@@ -50,7 +65,7 @@ CREATE TABLE users (
 );
 ```
 
-### 3.2 会话令牌表
+### 4.2 会话令牌表
 
 ```sql
 CREATE TABLE auth_tokens (
@@ -61,7 +76,9 @@ CREATE TABLE auth_tokens (
 CREATE INDEX idx_auth_tokens_user_id ON auth_tokens(user_id);
 ```
 
-### 3.3 聊天会话表
+### 4.3 聊天会话表
+
+> messages + meta + summary 合一。
 
 ```sql
 CREATE TABLE chats (
@@ -83,7 +100,7 @@ CREATE INDEX idx_chats_user_id     ON chats(user_id);
 CREATE INDEX idx_chats_updated_at  ON chats(updated_at DESC);
 ```
 
-### 3.4 长期记忆表
+### 4.4 长期记忆表
 
 ```sql
 CREATE TABLE memories (
@@ -99,7 +116,7 @@ CREATE TABLE memories (
 CREATE INDEX idx_memories_user_id ON memories(user_id);
 ```
 
-### 3.5 自定义提示词模板表
+### 4.5 自定义提示词模板表
 
 ```sql
 CREATE TABLE prompt_templates (
@@ -115,7 +132,7 @@ CREATE TABLE prompt_templates (
 CREATE INDEX idx_prompt_templates_user_id ON prompt_templates(user_id);
 ```
 
-### 3.6 知识库文档表
+### 4.6 知识库文档表
 
 ```sql
 CREATE TABLE knowledge_docs (
@@ -129,12 +146,11 @@ CREATE TABLE knowledge_docs (
 CREATE INDEX idx_knowledge_docs_user_id ON knowledge_docs(user_id);
 ```
 
-### 3.7 知识库向量表（pgvector）
+### 4.7 知识库向量表（pgvector）
+
+> 需先启用扩展：`CREATE EXTENSION IF NOT EXISTS vector;`
 
 ```sql
--- 需先启用扩展
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE knowledge_vectors (
   id          TEXT PRIMARY KEY,
   doc_id      TEXT NOT NULL REFERENCES knowledge_docs(id) ON DELETE CASCADE,
@@ -148,7 +164,7 @@ CREATE INDEX idx_kv_embedding ON knowledge_vectors
   USING hnsw (embedding vector_cosine_ops);
 ```
 
-### 3.8 MCP 服务器配置表（全局）
+### 4.8 MCP 服务器配置表（全局）
 
 ```sql
 CREATE TABLE mcp_servers (
@@ -162,7 +178,7 @@ CREATE TABLE mcp_servers (
 );
 ```
 
-### 3.9 请求日志表（append-only）
+### 4.9 请求日志表（append-only）
 
 ```sql
 CREATE TABLE request_logs (
@@ -185,153 +201,74 @@ CREATE INDEX idx_request_logs_user_id   ON request_logs(user_id);
 
 ---
 
-## 四、代码改造方案
+## 五、match_knowledge_vectors RPC 函数
 
-### 核心原则
+来自 `supabase/migrations/002_match_vectors.sql`，用于 RAG 语义检索，通过余弦距离排序：
 
-> 各 `lib/` 模块对外函数签名不变，API 路由零改动，仅替换内部实现。
-
-### 文件变更清单
-
-| 操作 | 文件 | 说明 |
-|------|------|------|
-| 新增 | `lib/db.ts` | Supabase 客户端单例 |
-| 改造 | `lib/auth.ts` | `fs` → Supabase `users` + `auth_tokens` 表 |
-| 改造 | `lib/storage.ts` | `fs` → Supabase `chats` + `memories` + `prompt_templates` 表 |
-| 改造 | `lib/rag.ts` | `fs` → Supabase `knowledge_docs` + `knowledge_vectors` + pgvector |
-| 改造 | `lib/mcp-config.ts` | `fs` → Supabase `mcp_servers` 表 |
-| 改造 | `lib/logger.ts` | `fs.appendFile` → `INSERT INTO request_logs` |
-| 不变 | `hooks/use-auth.ts` | 客户端 localStorage 逻辑不变 |
-| 不变 | `app/api/**/route.ts` | 函数签名不变 |
-| 不变 | `middleware.ts` | Edge Runtime 不改 |
-
-### 各模块改造要点
-
-#### lib/db.ts
-
-```ts
-import { createClient } from "@supabase/supabase-js"
-
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,  // 服务端绕过 RLS
-  { auth: { persistSession: false } }
+```sql
+CREATE OR REPLACE FUNCTION match_knowledge_vectors(
+  query_embedding vector(1536),
+  match_count int DEFAULT 5,
+  filter_user_id text DEFAULT NULL
 )
+RETURNS TABLE (
+  id text,
+  doc_id text,
+  chunk text,
+  similarity float
+)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    kv.id,
+    kv.doc_id,
+    kv.chunk,
+    1 - (kv.embedding <=> query_embedding) AS similarity
+  FROM knowledge_vectors kv
+  WHERE filter_user_id IS NULL OR kv.user_id = filter_user_id
+  ORDER BY kv.embedding <=> query_embedding
+  LIMIT match_count;
+$$;
 ```
 
-#### lib/auth.ts
-
-| 原函数 | 改造后 |
-|--------|--------|
-| `registerUser` | INSERT INTO users + INSERT INTO auth_tokens |
-| `loginUser` | SELECT FROM users WHERE email=... + verify + INSERT INTO auth_tokens |
-| `getUserByToken` | JOIN auth_tokens↔users WHERE token=... |
-| `logoutToken` | DELETE FROM auth_tokens WHERE token=... |
-| `authenticateUser` | 不变（调用 `getUserByToken`） |
-
-#### lib/storage.ts
-
-| 原函数 | 改造后 |
-|--------|--------|
-| `saveChat` | UPSERT INTO chats (messages JSONB, meta 字段) |
-| `loadChat` | SELECT messages FROM chats WHERE id=... AND user_id=... |
-| `listChats` | SELECT * FROM chats WHERE user_id=... ORDER BY updated_at DESC |
-| `deleteChat` | DELETE FROM chats WHERE id=... AND user_id=... |
-| `getChatMeta` | SELECT meta 字段 FROM chats WHERE id=... |
-| `saveSummary` | UPDATE chats SET summary=..., summarized_count=... |
-| `loadSummary` | SELECT summary, summarized_count FROM chats |
-| `saveMemory` | INSERT ... ON CONFLICT (user_id, type, key) DO UPDATE |
-| `loadAllMemories` | SELECT * FROM memories WHERE user_id=... |
-| `searchMemories` | SELECT * FROM memories WHERE value ILIKE %query% |
-| `listCustomTemplates` | SELECT * FROM prompt_templates WHERE user_id=... |
-| `saveCustomTemplate` | UPSERT INTO prompt_templates |
-| `deleteCustomTemplate` | DELETE FROM prompt_templates WHERE id=... AND user_id=... |
-
-#### lib/rag.ts
-
-| 原函数 | 改造后 |
-|--------|--------|
-| `embedAndStore` | INSERT INTO knowledge_docs + 批量 INSERT INTO knowledge_vectors |
-| `listDocs` | SELECT * FROM knowledge_docs WHERE user_id=... |
-| `deleteDoc` | DELETE FROM knowledge_docs WHERE id=... (CASCADE 删向量) |
-| `retrieve` | `SELECT chunk, embedding <=> $query_vec AS distance FROM knowledge_vectors WHERE user_id=... ORDER BY distance LIMIT k` |
-
-#### lib/mcp-config.ts
-
-| 原函数 | 改造后 |
-|--------|--------|
-| `listMCPServers` | SELECT * FROM mcp_servers |
-| `saveMCPServer` | UPSERT INTO mcp_servers |
-| `deleteMCPServer` | DELETE FROM mcp_servers WHERE id=... |
-
-#### lib/logger.ts
-
-| 原函数 | 改造后 |
-|--------|--------|
-| `logRequest` | INSERT INTO request_logs |
-| `getUsageStats` | SQL 聚合：`GROUP BY model, date_trunc('day', timestamp)` |
+- `query_embedding`：查询向量（1536 维）。
+- `match_count`：返回结果数量，默认 5。
+- `filter_user_id`：用户隔离过滤，`NULL` 表示匿名或不过滤。
+- `<=>` 为 pgvector 的余弦距离运算符，`1 - distance` 转换为相似度。
 
 ---
 
-## 五、环境变量
+## 六、种子数据
 
-`.env.local` 需包含以下变量：
+来自 `supabase/migrations/003_seed_mcp_servers.sql`，插入一个公开 MCP 服务器作为示例：
 
-```bash
-# AI Gateway
-AI_GATEWAY_API_KEY=...
-
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-SUPABASE_SERVICE_ROLE_KEY=...        # 服务端专用，绕过 RLS，切勿暴露给客户端
+```sql
+INSERT INTO mcp_servers (id, name, transport, url, enabled, created_at)
+VALUES
+  (
+    'toolkit-mcp',
+    'Toolkit MCP',
+    'streamable-http',
+    'https://toolkit.caseyjhand.com/mcp',
+    true,
+    now()
+  )
+ON CONFLICT (id) DO NOTHING;
 ```
 
-> `SUPABASE_SERVICE_ROLE_KEY` 可在 Supabase Dashboard → Settings → API → `service_role` secret 获取。
+- Toolkit MCP 是一个公开的 MCP 服务器，提供工具集能力。
+- 使用 `ON CONFLICT (id) DO NOTHING` 确保重复执行不会报错。
 
 ---
 
-## 六、实施步骤
+## 七、迁移文件列表
 
-```
-步骤 1  安装依赖
-        npm install @supabase/supabase-js
-
-步骤 2  确认环境变量
-        检查 .env.local 包含 SUPABASE_URL + SERVICE_ROLE_KEY
-
-步骤 3  创建迁移 SQL
-        supabase/migrations/001_init_schema.sql
-        （包含建表 + pgvector 扩展 + 索引）
-
-步骤 4  应用迁移
-        通过 supabase_apply_migration MCP 工具执行 SQL
-
-步骤 5  新建 lib/db.ts
-        Supabase 客户端单例
-
-步骤 6  逐模块改造（顺序：auth → storage → rag → mcp-config → logger）
-        每改一个模块跑 npx tsc --noEmit 验证
-
-步骤 7  （可选）数据迁移脚本
-        读 .data/ JSON → 写入 Supabase
-
-步骤 8  删除文件存储代码
-        确认无引用后清理 fs 相关 import
-```
-
----
-
-## 七、收益对比
-
-| 维度 | 文件存储 | Supabase |
-|------|---------|----------|
-| 并发写 | 无锁，竞争条件 | ACID 事务 |
-| 向量检索 | O(n) 全量扫描内存 | O(log n) HNSW 索引 |
-| 多实例 | 不可能 | 天然支持 |
-| 数据查询 | 读全量 JSON 过滤 | SQL 索引/聚合 |
-| 部署 | 需持久卷 | 托管服务 |
-| 可观测性 | 无 | Dashboard + 日志 |
+| 文件 | 说明 |
+|------|------|
+| `supabase/migrations/001_init_schema.sql` | 创建 9 张表 + pgvector 扩展 + HNSW 索引 |
+| `supabase/migrations/002_match_vectors.sql` | 创建 `match_knowledge_vectors` 向量检索 RPC 函数 |
+| `supabase/migrations/003_seed_mcp_servers.sql` | 插入 Toolkit MCP 种子数据 |
 
 ---
 
@@ -345,10 +282,22 @@ SUPABASE_SERVICE_ROLE_KEY=...        # 服务端专用，绕过 RLS，切勿暴�
 | `POST /api/chat` | `lib/storage.ts` + `lib/rag.ts` + `lib/auth.ts` + `lib/mcp-config.ts` + `lib/logger.ts` |
 | `GET /api/chats` | `lib/storage.ts` — listChats |
 | `POST /api/chats` | `lib/storage.ts` — saveChat |
-| `GET/DELETE /api/chats/[id]` | `lib/storage.ts` — loadChat/deleteChat/getChatMeta/saveChat |
+| `GET/DELETE/PATCH /api/chats/[id]` | `lib/storage.ts` — loadChat/deleteChat/getChatMeta/saveChat |
 | `GET /api/knowledge` | `lib/rag.ts` — listDocs/deleteDoc |
 | `POST /api/upload` | `lib/rag.ts` — embedAndStore |
 | `GET /api/memory` | `lib/storage.ts` — loadAllMemories |
-| `GET /api/prompt-templates` | `lib/storage.ts` — list/save/delete templates |
+| `GET/POST/DELETE /api/prompt-templates` | `lib/storage.ts` — list/save/delete templates |
 | `GET/POST/DELETE /api/mcp` | `lib/mcp-config.ts` — list/save/delete servers |
 | `GET /api/stats` | `lib/logger.ts` — getUsageStats |
+
+---
+
+## 九、用户隔离模式
+
+所有用户相关表均通过 `user_id` 字段实现隔离：
+
+- **登录用户**：`user_id` 为用户 ID（`user-{timestamp}-{rand}`）。
+- **匿名用户**：`user_id` 为 `NULL`。
+- 所有查询均通过 `.eq("user_id", userId ?? null)` 或 `.is("user_id", null)` 进行范围限定。
+- `listChats`、`loadChat`、`deleteChat`、`getChatMeta`、`saveSummary`、`loadSummary`、`searchMemories`、`listCustomTemplates` 等函数均接受 `userId?: string` 参数并按此过滤。
+- 全局表（如 `mcp_servers`、`request_logs`）不按用户隔离。
